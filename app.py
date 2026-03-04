@@ -178,24 +178,35 @@ elif app_mode == "Dashboard por Año":
         st.warning("⚠️ **No es posible saber la distribución de las líneas de producción debido a que los datos no fueron registrados.**")
     st.divider()
 
-# --- SECCIÓN 4: ENVASES (BARRAS APILADAS AL 100%) ---
+# --- SECCIÓN 4: ENVASES (BARRAS APILADAS AL 100% - CÁLCULO MANUAL) ---
     st.markdown("### 4️⃣ Proporción de Tipo de Envase (Porcentaje)")
     
-    df_env_pct = df_anio.groupby(['Mes', 'Tipo de Envase']).size().reset_index(name='Conteo')
+    # 1. Agrupamos para obtener el conteo por mes y envase
+    df_env_counts = df_anio.groupby(['Mes', 'Tipo de Envase']).size().reset_index(name='Conteo')
     
+    # 2. Calculamos el total por mes para poder sacar el %
+    df_total_mes = df_anio.groupby('Mes').size().reset_index(name='Total_Mes')
+    
+    # 3. Unimos ambos y calculamos el porcentaje
+    df_env_pct = pd.merge(df_env_counts, df_total_mes, on='Mes')
+    df_env_pct['Porcentaje'] = (df_env_pct['Conteo'] / df_env_pct['Total_Mes']) * 100
+
     if not df_env_pct.empty:
-        # Eliminamos 'barnorm' de los argumentos iniciales para evitar el TypeError
+        # 4. Graficamos directamente el valor 'Porcentaje'
         fig4 = px.bar(df_env_pct, 
                       x="Mes", 
-                      y="Conteo", 
+                      y="Porcentaje", 
                       color="Tipo de Envase",
                       title=f"Composición del empaque por mes ({anio_sel})",
                       category_orders={"Mes": orden_meses},
-                      text_auto='.1f')
+                      text=df_env_pct['Porcentaje'].apply(lambda x: f'{x:.1f}%'))
         
-        # Aplicamos la normalización al 100% (barnorm) mediante update_layout
-        fig4.update_layout(barmode='stack', yaxis=dict(ticksuffix="%", title="Porcentaje (%)"))
-        fig4.update_traces(selector=dict(type='bar'), barnorm='percent')
+        # Configuramos el barmode para que se apilen
+        fig4.update_layout(
+            barmode='stack',
+            yaxis_title="Porcentaje (%)",
+            yaxis_range=[0, 100]
+        )
         
         st.plotly_chart(fig4, use_container_width=True)
     else:
