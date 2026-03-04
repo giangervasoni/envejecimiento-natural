@@ -11,6 +11,9 @@ def load_data():
     # Cargar el CSV (asegúrate de que el archivo se llame datos.csv)
     df = pd.read_csv("Prueba Tableau.csv")
     
+    # Añadir etiqueta OK a las celdas que no lo tienen
+    df['Análisis final'] = df['Análisis final'].fillna('OK')
+    
     # Limpieza de fechas
     df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
     df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
