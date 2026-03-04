@@ -422,27 +422,86 @@ elif app_mode == "Comparativa de Productos":
         st.warning("Seleccione productos con datos suficientes para realizar la comparativa.")
 
 elif app_mode == "Predicción de Riesgo":
-    st.title("🛡️ Sistema de Alerta Temprana")
+    st.title("🔮 Simulador de Riesgo de Calidad")
+    st.markdown("""
+    Este modelo estima la **Probabilidad de Rancidez** basada en el comportamiento histórico de productos similares.
+    """)
+
+    # 1. Preparación de datos para el modelo
+    df_ml = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
+    df_ml = df_ml[df_ml['Dias_Vida_Real'] <= 450] # Límite de descarte
     
-    # Lógica de simulación
-    df_fallas = df_raw[df_raw['Análisis final'].isin(['RI', 'RD'])]
-    producto_sim = st.sidebar.selectbox("Producto a Evaluar:", df_raw['Producto'].unique())
-    dias_sim = st.sidebar.slider("Días de almacenamiento:", 0, 365, 180)
+    # Creamos una columna binaria: 1 si es falla (RI/RD), 0 si es OK
+    df_ml['Falla'] = df_ml['Análisis final'].apply(lambda x: 1 if x in ['RI', 'RD'] else 0)
 
-    # Cálculo de riesgo
-    fallas_similares = df_fallas[(df_fallas['Producto'] == producto_sim) & (df_fallas['Dias_Vida_Real'] <= dias_sim)]
-    total_fallas_prod = len(df_fallas[df_fallas['Producto'] == producto_sim])
-    score = (len(fallas_similares) / total_fallas_prod * 100) if total_fallas_prod > 0 else 0
+    # 2. Interfaz de Usuario (Simulador)
+    st.sidebar.header("Parámetros del Lote")
+    prod_sim = st.sidebar.selectbox("Producto a Evaluar:", sorted(df_ml['Producto'].unique()))
+    env_sim = st.sidebar.selectbox("Tipo de Envase:", sorted(df_ml['Tipo de Envase'].unique()))
+    maquina_sim = st.sidebar.selectbox("Línea de Envasado:", sorted(df_ml['Envasadora'].dropna().unique()))
+    
+    dias_sim = st.slider("Días de Almacenamiento Previstos:", 0, 450, 180)
 
-    # Semáforo
-    if score < 20: st.success(f"RIESGO BAJO ({score:.1f}%)")
-    elif score < 60: st.warning(f"RIESGO MEDIO ({score:.1f}%)")
-    else: st.error(f"RIESGO ALTO ({score:.1f}%)")
+    # 3. Lógica de Predicción (Basada en Frecuencia Histórica)
+    # Filtramos la base por los criterios seleccionados para ver su historial
+    df_hist = df_ml[(df_ml['Producto'] == prod_sim) & 
+                    (df_ml['Tipo de Envase'] == env_sim)]
+    
+    if not df_hist.empty:
+        # Calculamos riesgo en el rango de días seleccionado (+/- 30 días para tener muestra)
+        rango_inf = max(0, dias_sim - 30)
+        rango_sup = min(450, dias_sim + 30)
+        
+        df_rango = df_hist[(df_hist['Dias_Vida_Real'] >= rango_inf) & (df_hist['Dias_Vida_Real'] <= rango_sup)]
+        
+        if not df_rango.empty:
+            probabilidad = (df_rango['Falla'].mean()) * 100
+        else:
+            # Si no hay datos en ese rango exacto, usamos la tendencia general del producto
+            probabilidad = (df_hist['Falla'].mean()) * 100 * (dias_sim / 450)
 
-    # Historial de fallas
-    if not fallas_similares.empty:
-        st.subheader("Muestras Históricas que fallaron antes de este día")
-        st.table(fallas_similares[['Lote', 'Dias_Vida_Real', 'Análisis final']].head(5))
+        # --- VISUALIZACIÓN DEL RESULTADO ---
+        col_m1, col_m2 = st.columns(2)
+        
+        # Color del indicador según riesgo
+        color_riesgo = "normal" if probabilidad < 15 else "inverse"
+        
+        col_m1.metric("Probabilidad de Rancidez", f"{probabilidad:.1f}%", 
+                      delta=f"{'ALTO RIESGO' if probabilidad > 25 else 'ESTABLE'}", 
+                      delta_color=color_riesgo)
+        
+        col_m2.metric("Muestras de Referencia", len(df_hist))
+
+        # --- GRÁFICO DE CURVA DE RIESGO ---
+        st.subheader("📈 Curva de Degradación Estimada")
+        
+        # Generamos una curva teórica basada en los datos
+        curva_riesgo = []
+        for d in range(0, 451, 30):
+            p = (df_hist[df_hist['Dias_Vida_Real'] <= d]['Falla'].mean() if not df_hist[df_hist['Dias_Vida_Real'] <= d].empty else 0)
+            curva_riesgo.append({'Días': d, 'Riesgo': p * 100})
+        
+        df_curva = pd.DataFrame(curva_riesgo)
+        fig_curva = px.area(df_curva, x='Días', y='Riesgo', 
+                            title=f"Evolución del Riesgo para {prod_sim}",
+                            labels={'Riesgo': '% Probabilidad de Falla'})
+        
+        # Línea de tiempo actual seleccionada en el slider
+        fig_curva.add_vline(x=dias_sim, line_dash="dash", line_color="white", 
+                            annotation_text="Punto de Evaluación")
+        
+        st.plotly_chart(fig_curva, use_container_width=True)
+
+        # --- EXPLICABILIDAD ---
+        st.info(f"### 🔍 ¿Por qué este resultado?")
+        st.write(f"""
+        Basado en el histórico de **{len(df_hist)}** lotes de **{prod_sim}**:
+        * El envase **{env_sim}** tiene un impacto directo en la conservación.
+        * A los **{dias_sim} días**, la mayoría de los problemas registrados son de tipo **{df_hist[df_hist['Falla']==1]['Análisis final'].mode().tolist()[0] if not df_hist[df_hist['Falla']==1].empty else 'N/A'}**.
+        * El límite de seguridad sugerido es de **{df_hist[df_hist['Falla'] == 0]['Dias_Vida_Real'].quantile(0.75):.0f} días**.
+        """)
+    else:
+        st.warning("⚠️ No hay datos históricos suficientes para esta combinación de Producto y Envase.")
         
 # --- Mantenemos las otras secciones para que la app sea completa ---
 else:
