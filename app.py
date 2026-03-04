@@ -253,7 +253,7 @@ elif app_mode == "Dashboard por Año":
     else:
         st.success(f"✅ No se registraron fallas críticas en {anio_sel}.")
 
-# elif app_mode == "Estudio de Vida Útil":
+elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real (Límite 450 días)")
     st.caption("Nota: Las muestras son descartadas a los 15 meses (450 días) por política de espacio en sala.")
     
