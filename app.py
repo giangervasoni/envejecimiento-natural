@@ -245,49 +245,87 @@ elif app_mode == "Dashboard por Año":
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real (Límite 450 días)")
-    st.caption("Nota: Las muestras son descartadas a los 15 meses (450 días) por política de espacio.")
+    st.caption("Nota: Las muestras son descartadas a los 15 meses (450 días) por política de espacio en sala.")
     
-    # 1. Filtro estricto de seguridad
-    df_vida = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
-    # Aplicamos el límite físico de la sala de envejecimiento
-    df_vida = df_vida[(df_vida['Dias_Vida_Real'] >= 0) & (df_vida['Dias_Vida_Real'] <= 450)]
-    df_vida['Envasadora'] = df_vida['Envasadora'].fillna('SIN DATO')
+    # 1. Preparación de datos con límite físico de la sala
+    # Filtramos nulos en columnas críticas y aplicamos el límite de 450 días
+    df_vida_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
+    df_vida_base = df_vida_base[(df_vida_base['Dias_Vida_Real'] >= 0) & (df_vida_base['Dias_Vida_Real'] <= 450)]
+    df_vida_base['Envasadora'] = df_vida_base['Envasadora'].fillna('SIN DATO')
 
-    # ... (filtros de envasadora se mantienen igual) ...
+    # 2. Filtros de visualización
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Configuración de Vida Útil")
+    
+    envasadoras_disp = ["Todas"] + sorted(df_vida_base['Envasadora'].unique().tolist())
+    env_sel = st.sidebar.selectbox("Seleccione Envasadora:", envasadoras_disp)
+    
+    # Definimos df_plot aquí para evitar el NameError
+    if env_sel != "Todas":
+        df_plot = df_vida_base[df_vida_base['Envasadora'] == env_sel].copy()
+    else:
+        df_plot = df_vida_base.copy()
 
+    # 3. Lógica de Graficación
     if not df_plot.empty:
-        # --- GRÁFICO 1: DISPERSIÓN ---
+        # --- GRÁFICO 1: DISPERSIÓN (STRIP) ---
+        st.subheader(f"Distribución de Dictámenes: {env_sel}")
+        
         fig_vida = px.strip(df_plot, 
                            x="Dias_Vida_Real", 
                            y="Análisis final", 
                            color="Análisis final",
-                           range_x=[0, 480], # Dejamos un pequeño margen visual pero el dato corta en 450
+                           hover_data=['Producto', 'Envasadora'],
+                           range_x=[0, 480], # Margen visual post-descarte
                            title=f"Aparición de Rancidez hasta Descarte (450 días)",
                            color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
         
-        # Añadimos una línea roja vertical que marque el descarte
+        # Línea roja de descarte
         fig_vida.add_vline(x=450, line_dash="dash", line_color="red", 
-                          annotation_text="Límite de Descarte (15 meses)")
+                          annotation_text="Descarte (15 meses)")
         
         st.plotly_chart(fig_vida, use_container_width=True)
 
-        # --- MÉTRICA DE SEGURIDAD CORREGIDA ---
-        st.divider()
-        prod_lista = sorted(df_plot['Producto'].unique())
-        prod_vida = st.selectbox("Seleccione un producto para ver su límite real:", prod_lista)
-        
-        df_prod = df_plot[df_plot['Producto'] == prod_vida]
-        muestras_ok = df_prod[df_prod['Análisis final'] == 'OK']
-        
-        if not muestras_ok.empty:
-            max_dia = muestras_ok['Dias_Vida_Real'].max()
-            if max_dia >= 440:
-                st.success(f"✅ **{prod_vida}** alcanza el límite de descarte (450 días) sin presentar rancidez.")
-            else:
-                st.warning(f"⚠️ **{prod_vida}**: La última muestra 'OK' registrada fue a los **{max_dia} días**. No hay datos posteriores.")
-        else:
-            st.error(f"No hay registros 'OK' para {prod_vida} en el rango de estudio.")
+        # --- SECCIÓN COMPARATIVA ---
+        if env_sel == "Todas":
+            st.divider()
+            st.subheader("🏭 Estabilidad por Línea de Envasado")
+            fig_comp_env = px.box(df_plot, 
+                                 x="Envasadora", 
+                                 y="Dias_Vida_Real", 
+                                 color="Análisis final",
+                                 color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+            st.plotly_chart(fig_comp_env, use_container_width=True)
 
+        # --- ANÁLISIS POR PRODUCTO ---
+        st.divider()
+        st.subheader("🔬 Análisis Detallado por Producto")
+        prod_lista = sorted(df_plot['Producto'].unique())
+        prod_vida = st.selectbox("Seleccione un producto:", prod_lista)
+        
+        df_prod = df_plot[df_plot['Producto'] == prod_vida].sort_values('Dias_Vida_Real')
+        
+        if not df_prod.empty:
+            fig_hist = px.histogram(df_prod, 
+                                    x="Dias_Vida_Real", 
+                                    color="Análisis final",
+                                    title=f"Historial de estabilidad: {prod_vida}",
+                                    color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+            st.plotly_chart(fig_hist, use_container_width=True)
+            
+            # --- MÉTRICA DE ÉXITO DE VIDA ÚTIL ---
+            muestras_ok = df_prod[df_prod['Análisis final'] == 'OK']
+            if not muestras_ok.empty:
+                max_dia = muestras_ok['Dias_Vida_Real'].max()
+                if max_dia >= 440:
+                    st.success(f"✅ **{prod_vida}** completa el ciclo total de 15 meses sin presentar rancidez.")
+                else:
+                    st.warning(f"⚠️ **{prod_vida}**: La última muestra estable fue a los **{max_dia} días**. No hay datos OK registrados cerca del límite de descarte.")
+        else:
+            st.info("Sin datos para este producto.")
+    else:
+        st.warning(f"No hay registros válidos para {env_sel} dentro de los 450 días.")
+        
 elif app_mode == "Comparativa de Productos":
     st.title("⚖️ Comparativa de Estabilidad")
     productos = sorted(df_raw['Producto'].unique())
