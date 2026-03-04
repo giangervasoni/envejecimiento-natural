@@ -181,24 +181,22 @@ elif app_mode == "Dashboard por Año":
 # --- SECCIÓN 4: ENVASES (BARRAS APILADAS AL 100%) ---
     st.markdown("### 4️⃣ Proporción de Tipo de Envase (Porcentaje)")
     
-    # Agrupamos y contamos
     df_env_pct = df_anio.groupby(['Mes', 'Tipo de Envase']).size().reset_index(name='Conteo')
     
     if not df_env_pct.empty:
-        # Aseguramos que Conteo sea numérico por si acaso
-        df_env_pct['Conteo'] = pd.to_numeric(df_env_pct['Conteo'])
-        
+        # Eliminamos 'barnorm' de los argumentos iniciales para evitar el TypeError
         fig4 = px.bar(df_env_pct, 
                       x="Mes", 
                       y="Conteo", 
                       color="Tipo de Envase",
                       title=f"Composición del empaque por mes ({anio_sel})",
                       category_orders={"Mes": orden_meses},
-                      barnorm='percent',  # Esto crea el efecto 100% apilado
-                      text_auto='.1f')    # Muestra el % dentro de las barras
+                      text_auto='.1f')
         
-        # Ajustamos el layout para que el eje Y diga Porcentaje
-        fig4.update_layout(yaxis_title="Porcentaje (%)")
+        # Aplicamos la normalización al 100% (barnorm) mediante update_layout
+        fig4.update_layout(barmode='stack', yaxis=dict(ticksuffix="%", title="Porcentaje (%)"))
+        fig4.update_traces(selector=dict(type='bar'), barnorm='percent')
+        
         st.plotly_chart(fig4, use_container_width=True)
     else:
         st.info("No hay datos de envases para este año.")
