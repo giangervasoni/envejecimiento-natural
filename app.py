@@ -48,7 +48,17 @@ except Exception as e:
     st.stop()
 
 # 2. NAVEGACIÓN LATERAL
-st.sidebar.title("🤖 Menú laboratorio de calidad")
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=50)
+st.sidebar.title("🤖 Panel de Control laboratorio de calidad")
+# Indicadores de datos
+total_muestras = len(df_raw)
+ultima_fecha = df_raw['Fecha de análisis'].max().strftime('%d/%m/%Y')
+
+st.sidebar.info(f"""
+**📊 Estado del Dataset:**
+- Total muestras: `{total_muestras}`
+- Último análisis: `{ultima_fecha}`
+""")
 app_mode = st.sidebar.selectbox("Seleccione el Dashboard", 
                                 ["Dashboard General", 
                                  "Dashboard por Año", 
@@ -327,85 +337,89 @@ elif app_mode == "Dashboard por Año":
         st.warning(f"No hay registros válidos para {env_sel} dentro de los 450 días.")
         
 elif app_mode == "Comparativa de Productos":
-    st.title("⚖️ Comparativa de Estabilidad")
-    st.markdown("""
-    Esta sección compara la **resistencia a la rancidez** entre dos productos. 
-    Permite identificar cuál de los dos es más estable bajo las mismas condiciones de almacenamiento.
-    """)
+    st.title("⚖️ Comparativa de Estabilidad e Impacto Económico")
+    st.markdown("Análisis comparativo de resistencia a la rancidez y costos asociados por descarte prematuro.")
     
-    # 1. Preparación de datos (incluyendo el límite de 450 días)
+    # 1. Limpieza y preparación profunda
     df_comp_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
     df_comp_base = df_comp_base[(df_comp_base['Dias_Vida_Real'] >= 0) & (df_comp_base['Dias_Vida_Real'] <= 450)]
+    df_comp_base['Análisis final'] = df_comp_base['Análisis final'].astype(str).str.strip()
     
     productos = sorted(df_comp_base['Producto'].unique())
     col1, col2 = st.columns(2)
     p1 = col1.selectbox("Producto A (Referencia):", productos, index=0)
     p2 = col2.selectbox("Producto B (Comparación):", productos, index=1 if len(productos)>1 else 0)
     
-    df_selection = df_comp_base[df_comp_base['Producto'].isin([p1, p2])]
+    # Reset de índice para evitar errores de Plotly
+    df_selection = df_comp_base[df_comp_base['Producto'].isin([p1, p2])].reset_index(drop=True)
     
     if not df_selection.empty:
-        # --- GRÁFICO DE VIOLÍN/BOXPLOT ---
-        # El gráfico de violín muestra la densidad (donde hay más muestras)
-        fig_comp = px.violin(df_selection, 
-                             x="Producto", 
-                             y="Dias_Vida_Real", 
-                             color="Análisis final", 
-                             box=True, 
-                             points="all",
-                             hover_data=['Lote', 'Envasadora'],
-                             title=f"Distribución de estabilidad: {p1} vs {p2}",
-                             color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+        # --- PARÁMETRO DE COSTO ---
+        with st.sidebar.expander("💰 Configuración de Costos"):
+            costo_unidad = st.number_input("Costo por lote descartado (USD):", value=150)
+
+        # --- LÓGICA DE CÁLCULO ---
+        def get_all_stats(name):
+            d = df_selection[df_selection['Producto'] == name]
+            n = len(d)
+            # Fallas totales para tasa
+            fallas = d[d['Análisis final'].isin(['RI', 'RD'])]
+            tasa = (len(fallas) / n) if n > 0 else 0
+            # Fallas prematuras para costo (< 300 días)
+            prematuras = len(fallas[fallas['Dias_Vida_Real'] < 300])
+            costo = prematuras * costo_unidad
+            # Vida media estable
+            vida_media = d[d['Análisis final'] == 'OK']['Dias_Vida_Real'].mean()
+            return n, tasa, costo, vida_media
+
+        n1, t1, c1, v1 = get_all_stats(p1)
+        n2, t2, c2, v2 = get_all_stats(p2)
+
+        # --- SECCIÓN 1: CONCLUSIÓN IA ---
+        st.subheader("🤖 Conclusión del Análisis de Riesgo")
         
+        diff_tasa = abs(t1 - t2) * 100
+        mejor_p = p1 if t1 < t2 else p2
+        peor_p = p2 if t1 < t2 else p1
+        ahorro_estimado = abs(c1 - c2)
+
+        if t1 != t2:
+            texto_ia = f"El **{mejor_p}** presenta un **{diff_tasa:.1f}% menos** de riesgo de rancidez que el **{peor_p}**."
+            if ahorro_estimado > 0:
+                texto_ia += f" Esta estabilidad superior representa un ahorro potencial de **${ahorro_estimado:,.0f} USD** en pérdidas por descarte antes de los 300 días."
+            st.success(texto_ia)
+        else:
+            st.info("Ambos productos presentan un perfil de riesgo y desempeño sensorial idéntico.")
+
+        # --- SECCIÓN 2: GRÁFICO DE VIOLÍN ---
+        fig_comp = px.violin(df_selection, x="Producto", y="Dias_Vida_Real", color="Análisis final", 
+                             box=True, points="all",
+                             category_orders={"Análisis final": ["OK", "RI", "RD"]},
+                             color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'},
+                             title=f"Distribución de Estabilidad: {p1} vs {p2}")
+        
+        fig_comp.add_hline(y=450, line_dash="dash", line_color="red", annotation_text="Límite Descarte (15 meses)")
         st.plotly_chart(fig_comp, use_container_width=True)
 
-        # --- PANEL DE EXPLICABILIDAD (Para Stakeholders) ---
-        st.info("### 💡 Cómo interpretar este gráfico")
-        exp_col1, exp_col2 = st.columns(2)
-        
-        with exp_col1:
+        # --- SECCIÓN 3: EXPLICABILIDAD Y TABLA ---
+        with st.expander("📝 Guía de interpretación para Stakeholders"):
             st.markdown("""
-            **1. Los Puntos (Muestras):**
-            * Cada punto es un análisis real. 
-            * Si ves puntos **rojos (RD)** muy abajo (pocos días), ese producto tiene baja estabilidad.
-            
-            **2. La Caja (Estadística):**
-            * La línea central de la caja es la **Mediana**. 
-            * Si la caja de un producto es más alta que la del otro, significa que suele durar más tiempo 'OK'.
-            """)
-            
-        with exp_col2:
-            st.markdown("""
-            **3. El Violín (Densidad):**
-            * Las partes "gordas" del dibujo indican dónde se concentran la mayoría de tus análisis.
-            * Si el violín es ancho cerca de los 400 días, el producto es muy confiable.
+            * **Tasa de Fallas:** Probabilidad histórica de que el lote presente rancidez.
+            * **Costo por Fallas:** Pérdida económica estimada por muestras que no superaron los 10 meses de vida.
+            * **Vida Media OK:** Promedio de días que el producto se mantiene sensorialmente apto.
             """)
 
-        # --- TABLA COMPARATIVA DE MÉTRICAS ---
-        st.divider()
-        st.subheader("📊 Resumen Ejecutivo")
-        
-        # Cálculo de métricas para la tabla
-        def get_metrics(prod_name):
-            d = df_selection[df_selection['Producto'] == prod_name]
-            total = len(d)
-            fallas = len(d[d['Análisis final'].isin(['RI', 'RD'])])
-            tasa_falla = (fallas / total * 100) if total > 0 else 0
-            max_ok = d[d['Análisis final'] == 'OK']['Dias_Vida_Real'].max()
-            return total, tasa_falla, max_ok
-
-        m1 = get_metrics(p1)
-        m2 = get_metrics(p2)
-
-        resumen_data = {
-            "Métrica": ["Muestras Totales", "Tasa de Incidencia (RI/RD)", "Máxima Vida OK observada"],
-            p1: [f"{m1[0]}", f"{m1[1]:.1f}%", f"{m1[2]} días"],
-            p2: [f"{m2[0]}", f"{m2[1]:.1f}%", f"{m2[2]} días"]
-        }
-        st.table(pd.DataFrame(resumen_data))
+        st.subheader("📊 Resumen Ejecutivo Comparativo")
+        resumen_fin = pd.DataFrame({
+            "Métrica de Negocio": ["Muestras Analizadas", "Tasa de Fallas (%)", "Vida Media OK (Días)", "Impacto Económico (Pérdidas)"],
+            p1: [n1, f"{t1*100:.1f}%", f"{v1:.0f}" if v1==v1 else "N/A", f"${c1:,.0f} USD"],
+            p2: [n2, f"{t2*100:.1f}%", f"{v2:.0f}" if v2==v2 else "N/A", f"${c2:,.0f} USD"]
+        })
+        st.table(resumen_fin)
+        st.caption("⚠️ El impacto económico se calcula sobre fallos prematuros (antes de los 300 días de almacenamiento).")
 
     else:
-        st.warning("No hay datos suficientes para comparar estos productos.")
+        st.warning("Seleccione productos con datos suficientes para realizar la comparativa.")
 
 elif app_mode == "Predicción de Riesgo":
     st.title("🛡️ Sistema de Alerta Temprana")
