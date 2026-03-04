@@ -131,73 +131,87 @@ if app_mode == "Dashboard General":
 elif app_mode == "Dashboard por Año":
     st.title("📅 Análisis Evolutivo Anual")
     
-    # 1. Filtro de Año (usamos la columna que creamos en load_data)
+    # 1. Selección de Año
     años_disponibles = sorted(df_raw['Año_Envasado'].dropna().unique().astype(int), reverse=True)
     anio_sel = st.sidebar.selectbox("Seleccione Año de Elaboración:", años_disponibles)
     
-    # Filtrado por año
+    # Filtrado y preparación de fechas
     df_anio = df_raw[df_raw['Año_Envasado'] == anio_sel].copy()
-    
-    # Extraemos el mes y el nombre del mes para el eje X
     df_anio['Mes_Num'] = df_anio['Fecha de Envasado'].dt.month
     df_anio['Mes'] = df_anio['Fecha de Envasado'].dt.month_name()
-    # Ordenamos por número de mes para que el gráfico sea cronológico
     df_anio = df_anio.sort_values('Mes_Num')
-
-    st.subheader(f"📊 Reporte Consolidado - Temporada {anio_sel}")
-
-    # --- FILA 1 ---
-    col1, col2 = st.columns(2)
     
-    with col1:
-        st.markdown("### 1. Productos por Mes")
-        fig1 = px.histogram(df_anio, x="Mes", color="Producto", 
-                            title=f"Volumen de productos en {anio_sel}",
-                            category_orders={"Mes": ["January", "February", "March", "April", "May", "June", 
-                                                      "July", "August", "September", "October", "November", "December"]})
-        st.plotly_chart(fig1, use_container_width=True)
+    orden_meses = ["January", "February", "March", "April", "May", "June", 
+                   "July", "August", "September", "October", "November", "December"]
 
-    with col2:
-        st.markdown("### 2. Destinos por Mes")
-        # Asumiendo que tu columna se llama 'Destino'
-        if 'Destino' in df_anio.columns:
-            fig2 = px.bar(df_anio.groupby(['Mes', 'Destino']).size().reset_index(name='Cant'), 
-                          x="Mes", y="Cant", color="Destino", title="Distribución de Mercado")
-            st.plotly_chart(fig2, use_container_width=True)
-        else:
-            st.info("Columna 'Destino' no encontrada en el CSV.")
+    st.subheader(f"📊 Reporte Detallado - Temporada {anio_sel}")
 
+    # --- SECCIÓN 1: PRODUCTOS ---
+    st.markdown("### 1️⃣ Volumen de Productos por Mes")
+    fig1 = px.histogram(df_anio, x="Mes", color="Producto", 
+                        title=f"Cantidad de lotes ingresados mensualmente ({anio_sel})",
+                        category_orders={"Mes": orden_meses},
+                        barmode="group")
+    st.plotly_chart(fig1, use_container_width=True)
     st.divider()
 
-    # --- FILA 2 ---
-    col3, col4 = st.columns(2)
+    # --- SECCIÓN 2: DESTINOS ---
+    st.markdown("### 2️⃣ Destinos de los Productos")
+    if 'Destino' in df_anio.columns and not df_anio['Destino'].isnull().all():
+        fig2 = px.bar(df_anio.groupby(['Mes', 'Destino']).size().reset_index(name='Cantidad'), 
+                      x="Mes", y="Cantidad", color="Destino", 
+                      title="Distribución de Mercado Mensual",
+                      category_orders={"Mes": orden_meses})
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("ℹ️ No hay datos de 'Destino' registrados para este periodo.")
+    st.divider()
 
-    with col3:
-        st.markdown("### 3. Muestras por Envasadora")
-        # Asumiendo que tu columna se llama 'Envasadora' o similar
-        col_env = 'Envasadora' if 'Envasadora' in df_anio.columns else 'P/E/G' 
-        fig3 = px.pie(df_anio, names=col_env, hole=0.4, title="Participación de Líneas de Producción")
+    # --- SECCIÓN 3: ENVASADORAS (CON VALIDACIÓN) ---
+    st.markdown("### 3️⃣ Análisis por Envasadora")
+    # Verificamos si la columna existe y si tiene datos reales (no nulos)
+    col_env = 'Envasadora' 
+    if col_env in df_anio.columns and df_anio[col_env].notnull().any():
+        fig3 = px.pie(df_anio, names=col_env, hole=0.4, title="Distribución por Línea de Producción")
         st.plotly_chart(fig3, use_container_width=True)
-
-    with col4:
-        st.markdown("### 4. Envases por Mes")
-        fig4 = px.bar(df_anio, x="Mes", color="Tipo de Envase", barmode="group",
-                      title="Proporción de Empaque Mensual")
-        st.plotly_chart(fig4, use_container_width=True)
-
+    else:
+        st.warning("⚠️ **No es posible saber la distribución de las líneas de producción debido a que los datos no fueron registrados.**")
     st.divider()
 
-    # --- FILA 3 (Ancho completo) ---
-    st.markdown("### 5. Dictámenes Críticos por Mes")
-    # Análisis final: OK vs RI/RD
-    fig5 = px.area(df_anio.groupby(['Mes', 'Análisis final']).size().reset_index(name='Total'),
-                   x="Mes", y="Total", color="Análisis final", 
-                   title="Evolución de Calidad (Dictámenes)",
-                   color_discrete_map={'OK': 'green', 'RI': 'orange', 'RD': 'red'})
-    st.plotly_chart(fig5, use_container_width=True)
+    # --- SECCIÓN 4: ENVASES (BARRAS APILADAS AL 100%) ---
+    st.markdown("### 4️⃣ Proporción de Tipo de Envase (Porcentaje)")
+    # Creamos un dataframe agrupado para calcular porcentajes
+    df_env_pct = df_anio.groupby(['Mes', 'Tipo de Envase']).size().reset_index(name='Conteo')
+    fig4 = px.bar(df_env_pct, x="Mes", y="Conteo", color="Tipo de Envase",
+                  title="Composición del empaque por mes (100% apilado)",
+                  category_orders={"Mes": orden_meses},
+                  barnorm='percent') # Esto hace que sea apilado al 100%
+    st.plotly_chart(fig4, use_container_width=True)
+    st.divider()
 
-    with st.expander("🔍 Ver datos crudos del año seleccionado"):
-        st.dataframe(df_anio)
+    # --- SECCIÓN 5: DICTÁMENES ---
+    st.markdown("### 5️⃣ Ensayos según Dictamen")
+    fig5 = px.bar(df_anio, x="Mes", color="Análisis final", 
+                  title="Evolución de calidad por mes",
+                  category_orders={"Mes": orden_meses},
+                  color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+    st.plotly_chart(fig5, use_container_width=True)
+    st.divider()
+
+    # --- SECCIÓN 6: HEATMAP DE FALLAS (CALOR) ---
+    st.markdown("### 🔥 Mapa de Calor: Riesgo Crítico (RI/RD)")
+    df_fallas = df_anio[df_anio['Análisis final'].isin(['RI', 'RD'])]
+    
+    if not df_fallas.empty:
+        # Agrupamos por Producto y Mes para ver la densidad de fallas
+        df_heat = df_fallas.groupby(['Producto', 'Mes']).size().reset_index(name='Fallas')
+        fig_heat = px.density_heatmap(df_heat, x="Mes", y="Producto", z="Fallas",
+                                      color_continuous_scale="Reds",
+                                      title="Concentración de casos de Rancidez",
+                                      category_orders={"Mes": orden_meses})
+        st.plotly_chart(fig_heat, use_container_width=True)
+    else:
+        st.success("✅ **Excelente:** No se registraron fallas (RI/RD) en este año para generar el mapa de calor.")
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
