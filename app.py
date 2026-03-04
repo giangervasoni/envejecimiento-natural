@@ -255,85 +255,114 @@ elif app_mode == "Dashboard por Año":
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
+    st.markdown("Análisis de degradación sensorial segmentado por envase y línea de producción.")
     
-    # 1. Limpieza base
+    # 1. Limpieza base y preparación de etiquetas de envase
     df_vida_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
     df_vida_base = df_vida_base[df_vida_base['Dias_Vida_Real'] <= 450]
     df_vida_base['Análisis final'] = df_vida_base['Análisis final'].astype(str).str.strip()
-
-    # --- SIDEBAR CONFIG ---
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("⚙️ Configuración")
     
+    # Diccionario de mapeo para legibilidad
+    mapa_envases = {'G': 'Granel (G)', 'P': 'Pouch (P)', 'E': 'Estuchadora (E)'}
+    # Aseguramos que la columna tenga valores limpios para el mapeo
+    df_vida_base['Tipo de Envase'] = df_vida_base['Tipo de Envase'].astype(str).str.strip().str.upper()
+
+    # --- CONFIGURACIÓN EN BARRA LATERAL ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ Filtros del Estudio")
+    
+    # Filtro A: Envasadora
     if df_vida_base['Envasadora'].isna().all():
         envasadoras_opciones = ["Global"]
     else:
         envasadoras_opciones = ["Todas"] + sorted(df_vida_base['Envasadora'].dropna().unique().tolist())
-    
     env_sel = st.sidebar.selectbox("Seleccione Envasadora:", envasadoras_opciones)
 
-    productos_disp = sorted(df_vida_base['Producto'].unique())
-    prod_sel = st.sidebar.multiselect("Comparar Productos:", 
-                                     options=productos_disp, 
-                                     default=[productos_disp[0]] if productos_disp else [])
+    # Filtro B: Tipo de Envase (Nuevo)
+    envases_presentes = sorted(df_vida_base['Tipo de Envase'].unique())
+    envases_nombres = [mapa_envases.get(x, f"Otro ({x})") for x in envases_presentes]
+    
+    # Permitimos seleccionar varios tipos de envase
+    envase_sel_nombres = st.sidebar.multiselect(
+        "Tipo de Envase:",
+        options=envases_nombres,
+        default=envases_nombres
+    )
+    # Revertimos el nombre al código original para filtrar el DF
+    codigos_envase_sel = [n.split('(')[1].replace(')', '') for n in envase_sel_nombres]
 
-    # --- FILTRADO ---
-    df_plot = df_vida_base[df_vida_base['Producto'].isin(prod_sel)].copy()
+    # Filtro C: Productos
+    productos_disp = sorted(df_vida_base['Producto'].unique())
+    prod_sel = st.sidebar.multiselect(
+        "Comparar Productos:", 
+        options=productos_disp, 
+        default=[productos_disp[0]] if productos_disp else []
+    )
+
+    # --- APLICACIÓN DE FILTROS ---
+    df_plot = df_vida_base[
+        (df_vida_base['Producto'].isin(prod_sel)) & 
+        (df_vida_base['Tipo de Envase'].isin(codigos_envase_sel))
+    ].copy()
+    
     if env_sel not in ["Todas", "Global"]:
         df_plot = df_plot[df_plot['Envasadora'] == env_sel]
 
-    # RESET CRÍTICO DEL ÍNDICE
     df_plot = df_plot.reset_index(drop=True)
 
+    # --- VISUALIZACIÓN ---
     if not df_plot.empty:
-        # Aseguramos que la columna sea string simple antes de graficar para Plotly
-        df_plot['Análisis final'] = df_plot['Análisis final'].astype(str)
-        
-        st.info(f"📋 **Vista:** {'Agregada' if env_sel in ['Todas', 'Global'] else f'Línea {env_sel}'}")
+        st.info(f"📋 **Filtros Activos:** {len(df_plot)} muestras encontradas.")
 
-        # Gráfico con manejo de excepciones y parámetros simplificados
         try:
             fig_vida = px.strip(
                 df_plot, 
                 x="Dias_Vida_Real", 
                 y="Producto", 
                 color="Análisis final",
-                hover_data=["Lote"] if "Lote" in df_plot.columns else None,
-                title="Distribución de Calidad en el Tiempo",
+                hover_data=["Lote", "Tipo de Envase"] if "Lote" in df_plot.columns else None,
+                title="Distribución Temporal de Calidad",
                 category_orders={"Análisis final": ["OK", "RI", "RD"]},
-                color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'}
+                color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'},
+                stripmode='group'
             )
-            fig_vida.add_vline(x=450, line_dash="dash", line_color="red")
+            fig_vida.add_vline(x=450, line_dash="dash", line_color="red", annotation_text="Límite 450d")
             st.plotly_chart(fig_vida, use_container_width=True)
-        except Exception as e:
-            st.error("No se pudo generar el gráfico. Verifique que las columnas 'Producto' y 'Análisis final' existan.")
+        except Exception:
+            st.error("Error visualizando los puntos. Verifique la consistencia de los datos filtrados.")
 
-        # --- TABLA DE RESUMEN CORREGIDA (Sin lambdas complejas) ---
-        st.subheader("📊 Resumen por Producto")
+        # --- TABLA DE RESUMEN (Cálculo manual robusto) ---
+        st.subheader("📊 Resumen Ejecutivo")
         
-        resumen_data = []
+        resumen_list = []
         for p in prod_sel:
-            sub = df_plot[df_plot['Producto'] == p]
-            if not sub.empty:
-                n_muestras = len(sub)
-                # Calculamos media de días solo para los OK
-                muestras_ok = sub[sub['Análisis final'] == 'OK']
+            p_data = df_plot[df_plot['Producto'] == p]
+            if not p_data.empty:
+                muestras_ok = p_data[p_data['Análisis final'] == 'OK']
                 v_media = muestras_ok['Dias_Vida_Real'].mean() if not muestras_ok.empty else 0
+                tasa_falla = (len(p_data[p_data['Análisis final'].isin(['RI', 'RD'])]) / len(p_data)) * 100
                 
-                resumen_data.append({
+                resumen_list.append({
                     "Producto": p,
-                    "Muestras Analizadas": n_muestras,
-                    "Vida Media OK (Días)": v_media
+                    "Muestras": len(p_data),
+                    "Vida Media OK (Días)": v_media,
+                    "Tasa Crítica (%)": tasa_falla
                 })
         
-        if resumen_data:
-            df_resumen = pd.DataFrame(resumen_data)
-            st.table(df_resumen.style.format({"Vida Media OK (Días)": "{:.0f}"}))
-        else:
-            st.write("Sin datos para el resumen.")
+        if resumen_list:
+            st.table(pd.DataFrame(resumen_list).style.format({
+                "Vida Media OK (Días)": "{:.0f}",
+                "Tasa Crítica (%)": "{:.1f}%"
+            }))
+            
+        # --- INSIGHT DE ENVASE ---
+        with st.expander("💡 Análisis por Tipo de Envase"):
+            envase_stats = df_plot.groupby('Tipo de Envase')['Análisis final'].value_counts(normalize=True).unstack().fillna(0) * 100
+            st.write("Distribución porcentual de resultados por envase:")
+            st.dataframe(envase_stats.style.format("{:.1f}%"))
 
     else:
-        st.warning("Seleccione al menos un producto y asegúrese de que existan datos.")
+        st.warning("No hay datos que coincidan con los filtros de Producto, Envase y Envasadora seleccionados.")
         
 elif app_mode == "Comparativa de Productos":
     st.title("⚖️ Comparativa de Estabilidad e Impacto Económico")
