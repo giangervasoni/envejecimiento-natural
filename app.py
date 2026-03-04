@@ -18,11 +18,16 @@ def load_data():
     df['Análisis final'] = df['Análisis final'].fillna('OK')
     df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
     df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
-    # --- PROCESO DE UNIFICACIÓN DE NOMBRES ---
+    
+    # --- LIMPIEZA DE NULOS ---
+    # Eliminamos filas donde el nombre del Producto sea nulo 
+    # o lo reemplazamos por 'SIN NOMBRE'
+    df['Producto'] = df['Producto'].fillna('DESCONOCIDO')
+    
+    # --- PROCESO DE UNIFICACIÓN ---
     # 1. Convertir todo a MAYÚSCULAS para evitar duplicados por minúsculas
-    df['Producto'] = df['Producto'].str.upper()
-    # 2. Eliminar espacios en blanco sobrantes al inicio y al final
-    df['Producto'] = df['Producto'].str.strip()
+    df['Producto'] = df['Producto'].str.upper().str.strip()
+
     df['Producto'] = df['Producto'].replace({
         'AVENA INSTANTANEA': 'AVENA INSTANTÁNEA',
         'AVENA HARINA': 'AVENA INSTANTÁNEA'
