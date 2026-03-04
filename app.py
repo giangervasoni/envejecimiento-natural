@@ -256,17 +256,15 @@ elif app_mode == "Dashboard por Año":
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
     
-    # 1. Preparación de base limpia
+    # 1. Limpieza base
     df_vida_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
     df_vida_base = df_vida_base[df_vida_base['Dias_Vida_Real'] <= 450]
-    # Limpieza crítica de strings para evitar errores de mapeo
     df_vida_base['Análisis final'] = df_vida_base['Análisis final'].astype(str).str.strip()
 
-    # --- CONFIGURACIÓN LATERAL ---
+    # --- SIDEBAR CONFIG ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("⚙️ Configuración")
     
-    # Lógica de Envasadora (Global/Todas)
     if df_vida_base['Envasadora'].isna().all():
         envasadoras_opciones = ["Global"]
     else:
@@ -274,66 +272,68 @@ elif app_mode == "Estudio de Vida Útil":
     
     env_sel = st.sidebar.selectbox("Seleccione Envasadora:", envasadoras_opciones)
 
-    # Filtro Multiselect de Productos
     productos_disp = sorted(df_vida_base['Producto'].unique())
     prod_sel = st.sidebar.multiselect("Comparar Productos:", 
                                      options=productos_disp, 
                                      default=[productos_disp[0]] if productos_disp else [])
 
-    # --- FILTRADO SEGURO ---
+    # --- FILTRADO ---
     df_plot = df_vida_base[df_vida_base['Producto'].isin(prod_sel)].copy()
-    
     if env_sel not in ["Todas", "Global"]:
         df_plot = df_plot[df_plot['Envasadora'] == env_sel]
 
-    # --- SOLUCIÓN AL VALUEERROR: Reset y Validación ---
+    # RESET CRÍTICO DEL ÍNDICE
     df_plot = df_plot.reset_index(drop=True)
 
     if not df_plot.empty:
-        # Forzamos a que la columna sea categórica con el orden específico 
-        # Esto evita que Plotly falle si falta alguna categoría (ej. no hay RD)
-        categorias_esperadas = ["OK", "RI", "RD"]
-        df_plot['Análisis final'] = pd.Categorical(df_plot['Análisis final'], 
-                                                 categories=categorias_esperadas, 
-                                                 ordered=True)
-
+        # Aseguramos que la columna sea string simple antes de graficar para Plotly
+        df_plot['Análisis final'] = df_plot['Análisis final'].astype(str)
+        
         st.info(f"📋 **Vista:** {'Agregada' if env_sel in ['Todas', 'Global'] else f'Línea {env_sel}'}")
 
+        # Gráfico con manejo de excepciones y parámetros simplificados
         try:
-            fig_vida = px.strip(df_plot, 
-                               x="Dias_Vida_Real", 
-                               y="Producto", 
-                               color="Análisis final",
-                               hover_data=['Lote'],
-                               title="Distribución de Dictámenes en el Tiempo",
-                               # Usamos explícitamente las categorías para que el mapa no se pierda
-                               category_orders={"Análisis final": categorias_esperadas},
-                               color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'},
-                               stripmode='group') # 'group' ayuda a separar los puntos por color
-            
-            fig_vida.add_vline(x=450, line_dash="dash", line_color="red", annotation_text="Límite 450d")
-            
-            # Ajuste estético para que los puntos no se encimen demasiado
-            fig_vida.update_layout(margin=dict(l=20, r=20, t=50, b=20))
-            
+            fig_vida = px.strip(
+                df_plot, 
+                x="Dias_Vida_Real", 
+                y="Producto", 
+                color="Análisis final",
+                hover_data=["Lote"] if "Lote" in df_plot.columns else None,
+                title="Distribución de Calidad en el Tiempo",
+                category_orders={"Análisis final": ["OK", "RI", "RD"]},
+                color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'}
+            )
+            fig_vida.add_vline(x=450, line_dash="dash", line_color="red")
             st.plotly_chart(fig_vida, use_container_width=True)
-            
         except Exception as e:
-            st.error("Error en la generación del gráfico estadístico.")
-            st.info("Mostrando tabla de datos crudos debido a inconsistencia en la muestra.")
-            st.dataframe(df_plot)
+            st.error("No se pudo generar el gráfico. Verifique que las columnas 'Producto' y 'Análisis final' existan.")
 
-        # --- TABLA DE RESUMEN ---
+        # --- TABLA DE RESUMEN CORREGIDA (Sin lambdas complejas) ---
         st.subheader("📊 Resumen por Producto")
-        resumen = df_plot.groupby('Producto', observed=True).agg(
-            Muestras=('Lote', 'count'),
-            Dias_Promedio_OK=('Dias_Vida_Real', lambda x: x[df_plot.loc[x.index, 'Análisis final'] == 'OK'].mean())
-        ).reset_index()
         
-        st.table(resumen.style.format({"Dias_Promedio_OK": "{:.0f}"}))
+        resumen_data = []
+        for p in prod_sel:
+            sub = df_plot[df_plot['Producto'] == p]
+            if not sub.empty:
+                n_muestras = len(sub)
+                # Calculamos media de días solo para los OK
+                muestras_ok = sub[sub['Análisis final'] == 'OK']
+                v_media = muestras_ok['Dias_Vida_Real'].mean() if not muestras_ok.empty else 0
+                
+                resumen_data.append({
+                    "Producto": p,
+                    "Muestras Analizadas": n_muestras,
+                    "Vida Media OK (Días)": v_media
+                })
+        
+        if resumen_data:
+            df_resumen = pd.DataFrame(resumen_data)
+            st.table(df_resumen.style.format({"Vida Media OK (Días)": "{:.0f}"}))
+        else:
+            st.write("Sin datos para el resumen.")
 
     else:
-        st.warning("No hay datos para la combinación de filtros seleccionada.")
+        st.warning("Seleccione al menos un producto y asegúrese de que existan datos.")
         
 elif app_mode == "Comparativa de Productos":
     st.title("⚖️ Comparativa de Estabilidad e Impacto Económico")
