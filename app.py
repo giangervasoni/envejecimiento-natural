@@ -37,7 +37,7 @@ def load_data():
     df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
     df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
     
-    mapa_envase = {'P': 'Paquete', 'E': 'Estuche', 'G': 'Granel'}
+    mapa_envase = {'P': 'Pouch', 'E': 'Estuche', 'G': 'Granel'}
     df['Tipo de Envase'] = df['P/E/G'].map(mapa_envase).fillna('Otro')
     return df
 
@@ -141,8 +141,8 @@ elif app_mode == "Dashboard por Año":
     df_anio['Mes'] = df_anio['Fecha de Envasado'].dt.month_name()
     df_anio = df_anio.sort_values('Mes_Num')
     
-    orden_meses = ["January", "February", "March", "April", "May", "June", 
-                   "July", "August", "September", "October", "November", "December"]
+    orden_meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
     st.subheader(f"📊 Reporte Detallado - Temporada {anio_sel}")
 
@@ -244,10 +244,77 @@ elif app_mode == "Dashboard por Año":
         st.success(f"✅ No se registraron fallas críticas en {anio_sel}.")
 
 elif app_mode == "Estudio de Vida Útil":
-    st.title("⏱️ Estudio de Vida Útil Real")
-    fig_vida = px.scatter(df_raw, x="Dias_Vida_Real", y="pH", color="Análisis final",
-                          hover_data=['Lote', 'Producto'], title="Degradación de pH vs Días")
-    st.plotly_chart(fig_vida, use_container_width=True)
+    st.title("⏱️ Estudio de Vida Útil Real (Análisis Sensorial)")
+    
+    # 1. Limpieza y preparación de datos
+    df_vida = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
+    df_vida = df_vida[df_vida['Dias_Vida_Real'] >= 0]
+
+    # --- NUEVA SECCIÓN DE FILTROS LATERALES ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Filtros de Vida Útil")
+    
+    # Filtro por Envasadora
+    envasadoras_disp = ["Todas"] + sorted(df_vida['Envasadora'].dropna().unique().tolist())
+    env_sel = st.sidebar.selectbox("Seleccione Envasadora:", envasadoras_disp)
+    
+    # Aplicar filtro
+    if env_sel != "Todas":
+        df_vida = df_vida[df_vida['Envasadora'] == env_sel]
+
+    if not df_vida.empty:
+        # --- GRÁFICO 1: DISPERSIÓN DE FALLAS ---
+        st.subheader(f"Distribución de Dictámenes: {env_sel}")
+        fig_vida = px.strip(df_vida, 
+                           x="Dias_Vida_Real", 
+                           y="Análisis final", 
+                           color="Análisis final",
+                           hover_data=['Lote', 'Producto', 'Envasadora'],
+                           title=f"Aparición de Rancidez - Filtro: {env_sel}",
+                           color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+        
+        st.plotly_chart(fig_vida, use_container_width=True)
+
+        # --- SECCIÓN COMPARATIVA (Solo si se selecciona 'Todas') ---
+        if env_sel == "Todas":
+            st.divider()
+            st.subheader("🏭 Comparativa de Estabilidad por Envasadora")
+            st.markdown("Este gráfico permite ver si alguna máquina presenta fallas (RI/RD) en tiempos más cortos que las demás.")
+            
+            fig_comp_env = px.box(df_vida, 
+                                 x="Envasadora", 
+                                 y="Dias_Vida_Real", 
+                                 color="Análisis final",
+                                 title="Días de vida alcanzados por Línea de Envasado",
+                                 color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+            st.plotly_chart(fig_comp_env, use_container_width=True)
+
+        # --- GRÁFICO 2: CURVA POR PRODUCTO ---
+        st.divider()
+        st.subheader("🔬 Análisis Detallado por Producto")
+        prod_vida = st.selectbox("Seleccione un producto para ver su estabilidad:", 
+                                 sorted(df_vida['Producto'].unique()))
+        
+        df_prod = df_vida[df_vida['Producto'] == prod_vida].sort_values('Dias_Vida_Real')
+        
+        fig_hist = px.histogram(df_prod, 
+                                x="Dias_Vida_Real", 
+                                color="Análisis final",
+                                nbins=20,
+                                title=f"Frecuencia de dictámenes para {prod_vida} (Línea: {env_sel})",
+                                color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+        st.plotly_chart(fig_hist, use_container_width=True)
+        
+        # --- MÉTRICA DE SEGURIDAD ---
+        muestras_ok = df_prod[df_prod['Análisis final'] == 'OK']
+        if not muestras_ok.empty:
+            dias_max_ok = muestras_ok['Dias_Vida_Real'].max()
+            st.info(f"💡 **Dato clave:** El lote más antiguo de **{prod_vida}** en la línea **{env_sel}** que sigue 'OK' tiene **{dias_max_ok} días**.")
+        else:
+            st.warning(f"No hay muestras con dictamen 'OK' para {prod_vida} bajo este filtro.")
+
+    else:
+        st.warning(f"No hay registros para la envasadora {env_sel} con los datos actuales.")
 
 elif app_mode == "Comparativa de Productos":
     st.title("⚖️ Comparativa de Estabilidad")
