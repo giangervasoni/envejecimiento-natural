@@ -255,71 +255,85 @@ elif app_mode == "Dashboard por Año":
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
-    st.markdown("Análisis de la degradación sensorial en condiciones naturales de almacenamiento.")
     
-    # 1. Preparación de datos (Techo de 450 días)
+    # 1. Preparación de base limpia
     df_vida_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
     df_vida_base = df_vida_base[df_vida_base['Dias_Vida_Real'] <= 450]
+    # Limpieza crítica de strings para evitar errores de mapeo
     df_vida_base['Análisis final'] = df_vida_base['Análisis final'].astype(str).str.strip()
 
-    # --- CONFIGURACIÓN EN BARRA LATERAL ---
+    # --- CONFIGURACIÓN LATERAL ---
     st.sidebar.markdown("---")
-    st.sidebar.subheader("⚙️ Configuración del Estudio")
+    st.sidebar.subheader("⚙️ Configuración")
     
-    # Filtro de Envasadoras con lógica de agregación
+    # Lógica de Envasadora (Global/Todas)
     if df_vida_base['Envasadora'].isna().all():
-        envasadoras_opciones = ["Global (Sin datos de línea)"]
+        envasadoras_opciones = ["Global"]
     else:
         envasadoras_opciones = ["Todas"] + sorted(df_vida_base['Envasadora'].dropna().unique().tolist())
     
     env_sel = st.sidebar.selectbox("Seleccione Envasadora:", envasadoras_opciones)
 
-    # Filtro Multiselect de Productos (Tu nueva solicitud)
-    productos_disponibles = sorted(df_vida_base['Producto'].unique())
-    productos_seleccionados = st.sidebar.multiselect(
-        "Seleccione Productos para comparar:",
-        options=productos_disponibles,
-        default=[productos_disponibles[0]] if productos_disponibles else []
-    )
+    # Filtro Multiselect de Productos
+    productos_disp = sorted(df_vida_base['Producto'].unique())
+    prod_sel = st.sidebar.multiselect("Comparar Productos:", 
+                                     options=productos_disp, 
+                                     default=[productos_disp[0]] if productos_disp else [])
 
-    # --- APLICACIÓN DE FILTROS ---
-    df_plot = df_vida_base[df_vida_base['Producto'].isin(productos_seleccionados)].copy()
+    # --- FILTRADO SEGURO ---
+    df_plot = df_vida_base[df_vida_base['Producto'].isin(prod_sel)].copy()
     
-    # Si selecciona "Todas" o no hay datos de línea, no filtramos por envasadora (análisis de conjunto)
-    if env_sel not in ["Todas", "Global (Sin datos de línea)"]:
+    if env_sel not in ["Todas", "Global"]:
         df_plot = df_plot[df_plot['Envasadora'] == env_sel]
 
-    # --- VISUALIZACIÓN ---
+    # --- SOLUCIÓN AL VALUEERROR: Reset y Validación ---
+    df_plot = df_plot.reset_index(drop=True)
+
     if not df_plot.empty:
-        contexto_linea = "Análisis Agregado (Todas las Líneas)" if env_sel in ["Todas", "Global (Sin datos de línea)"] else f"Línea: {env_sel}"
-        st.info(f"📋 **Alcance del análisis:** {contexto_linea} | **Productos:** {', '.join(productos_seleccionados)}")
+        # Forzamos a que la columna sea categórica con el orden específico 
+        # Esto evita que Plotly falle si falta alguna categoría (ej. no hay RD)
+        categorias_esperadas = ["OK", "RI", "RD"]
+        df_plot['Análisis final'] = pd.Categorical(df_plot['Análisis final'], 
+                                                 categories=categorias_esperadas, 
+                                                 ordered=True)
 
-        # Gráfico de dispersión temporal por producto
-        fig_vida = px.strip(df_plot, 
-                           x="Dias_Vida_Real", 
-                           y="Producto", 
-                           color="Análisis final",
-                           hover_data=['Lote', 'Envasadora'],
-                           title="Distribución de Calidad en el Tiempo",
-                           category_orders={"Análisis final": ["OK", "RI", "RD"]},
-                           color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-        
-        fig_vida.add_hline(y=0.5, line_dash="dash", line_color="gray", opacity=0.3)
-        fig_vida.add_vline(x=450, line_dash="solid", line_color="red", annotation_text="Límite Descarte")
-        
-        st.plotly_chart(fig_vida, use_container_width=True)
+        st.info(f"📋 **Vista:** {'Agregada' if env_sel in ['Todas', 'Global'] else f'Línea {env_sel}'}")
 
-        # Estadísticas Comparativas
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.markdown("**Resumen de Estabilidad**")
-            # Mostrar días promedio OK por producto seleccionado
-            resumen = df_plot[df_plot['Análisis final'] == 'OK'].groupby('Producto')['Dias_Vida_Real'].mean().reset_index()
-            resumen.columns = ['Producto', 'Días Promedio OK']
-            st.dataframe(resumen.style.format({"Días Promedio OK": "{:.0f}"}))
+        try:
+            fig_vida = px.strip(df_plot, 
+                               x="Dias_Vida_Real", 
+                               y="Producto", 
+                               color="Análisis final",
+                               hover_data=['Lote'],
+                               title="Distribución de Dictámenes en el Tiempo",
+                               # Usamos explícitamente las categorías para que el mapa no se pierda
+                               category_orders={"Análisis final": categorias_esperadas},
+                               color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'},
+                               stripmode='group') # 'group' ayuda a separar los puntos por color
+            
+            fig_vida.add_vline(x=450, line_dash="dash", line_color="red", annotation_text="Límite 450d")
+            
+            # Ajuste estético para que los puntos no se encimen demasiado
+            fig_vida.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+            
+            st.plotly_chart(fig_vida, use_container_width=True)
+            
+        except Exception as e:
+            st.error("Error en la generación del gráfico estadístico.")
+            st.info("Mostrando tabla de datos crudos debido a inconsistencia en la muestra.")
+            st.dataframe(df_plot)
+
+        # --- TABLA DE RESUMEN ---
+        st.subheader("📊 Resumen por Producto")
+        resumen = df_plot.groupby('Producto', observed=True).agg(
+            Muestras=('Lote', 'count'),
+            Dias_Promedio_OK=('Dias_Vida_Real', lambda x: x[df_plot.loc[x.index, 'Análisis final'] == 'OK'].mean())
+        ).reset_index()
+        
+        st.table(resumen.style.format({"Dias_Promedio_OK": "{:.0f}"}))
 
     else:
-        st.warning("No se encontraron registros para la combinación de filtros seleccionada.")
+        st.warning("No hay datos para la combinación de filtros seleccionada.")
         
 elif app_mode == "Comparativa de Productos":
     st.title("⚖️ Comparativa de Estabilidad e Impacto Económico")
