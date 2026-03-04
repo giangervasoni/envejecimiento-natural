@@ -221,29 +221,27 @@ elif app_mode == "Dashboard por Año":
     st.plotly_chart(fig5, use_container_width=True)
     st.divider()
 
-   # --- SECCIÓN 6: HEATMAP DE FALLAS (CALOR) ---
+# --- SECCIÓN 6: HEATMAP DE FALLAS (CALOR) ---
     st.markdown("### 🔥 Mapa de Calor: Riesgo Crítico (RI/RD)")
-    
-    # Filtramos solo las fallas
     df_fallas = df_anio[df_anio['Análisis final'].isin(['RI', 'RD'])].copy()
     
     if not df_fallas.empty:
-        # Agrupamos asegurando que no queden índices raros
-        df_heat = df_fallas.groupby(['Producto', 'Mes']).size().reset_index(name='Fallas')
+        # Agrupamos por Producto y Mes
+        df_heat = df_fallas.groupby(['Producto', 'Mes']).size().reset_index(name='Cantidad_Fallas')
         
+        # Usamos la función más básica de Plotly para asegurar compatibilidad
         fig_heat = px.density_heatmap(
             df_heat, 
             x="Mes", 
             y="Producto", 
-            z="Fallas",
+            z="Cantidad_Fallas",
             color_continuous_scale="Reds",
-            title="Concentración de casos de Rancidez por Producto y Mes",
             category_orders={"Mes": orden_meses},
-            text_auto=True # Muestra el número de fallas en el cuadradito
+            text_auto=True
         )
         st.plotly_chart(fig_heat, use_container_width=True)
     else:
-        st.success(f"✅ No se detectaron fallas críticas (RI/RD) en el año {anio_sel}.")
+        st.success(f"✅ No se registraron fallas críticas en {anio_sel}.")
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
