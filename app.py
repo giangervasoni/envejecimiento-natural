@@ -7,92 +7,107 @@ st.set_page_config(page_title="IA Calidad Alimentos", layout="wide")
 
 @st.cache_data
 def load_data():
-    # Usamos sep=None y engine='python' para que detecte si es coma o punto y coma
-    # on_bad_lines='skip' saltará la línea 396 si está corrupta para que la app no falle
+    # Ingesta robusta: detecta separador y salta líneas corruptas
     df = pd.read_csv("Prueba Tableau.csv", 
                      encoding='latin1', 
                      sep=None, 
                      engine='python', 
                      on_bad_lines='skip')
+    
+    # Limpieza y Conversión
     df['Análisis final'] = df['Análisis final'].fillna('OK')
     df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
     df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
+    
+    # Ingeniería de Características (Features)
     df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
+    df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
+    
     mapa_envase = {'P': 'Paquete', 'E': 'Estuche', 'G': 'Granel'}
     df['Tipo de Envase'] = df['P/E/G'].map(mapa_envase).fillna('Otro')
     return df
 
-df_raw = load_data()
+try:
+    df_raw = load_data()
+except Exception as e:
+    st.error(f"Error al cargar el archivo: {e}")
+    st.stop()
 
-# 3. NAVEGACIÓN
-st.sidebar.title("🤖 Menú IA Laboratorio")
+# 2. NAVEGACIÓN LATERAL
+st.sidebar.title("🤖 Menú laboratorio de calidad")
 app_mode = st.sidebar.selectbox("Seleccione el Dashboard", 
-                                ["Dashboard General", "Comparativa de Productos", "Predicción de Riesgo"])
+                                ["Dashboard General", 
+                                 "Dashboard por Año", 
+                                 "Estudio de Vida Útil", 
+                                 "Comparativa de Productos", 
+                                 "Predicción de Riesgo"])
 
-# --- SECCIÓN: PREDICCIÓN DE RIESGO ---
-if app_mode == "Predicción de Riesgo":
-    st.title("🛡️ Sistema de Alerta Temprana de Rancidez")
-    st.markdown("""
-    Este modelo analiza el historial de fallas (RI/RD) para predecir si una muestra actual 
-    podría presentar problemas de calidad según sus días de almacenamiento.
-    """)
+# --- LÓGICA DE VISUALIZACIÓN ---
 
-    # --- LÓGICA DE Probabilidad Histórica ---
-    # Calculamos la probabilidad de falla por producto y rango de días ("Feature Engineering")
+if app_mode == "Dashboard General":
+    st.title("🔬 Dashboard General de Calidad")
+    # Definimos df_filtrado para que no de error
+    df_filtrado = df_raw.copy()
+    
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Muestras", len(df_filtrado))
+    c2.metric("Productos Únicos", df_filtrado['Producto'].nunique())
+    c3.metric("Casos Críticos (RI/RD)", len(df_filtrado[df_filtrado['Análisis final'].isin(['RI', 'RD'])]))
+    
+    fig_prod = px.bar(df_filtrado['Producto'].value_counts(), title="Muestras por Producto")
+    st.plotly_chart(fig_prod, use_container_width=True)
+
+elif app_mode == "Dashboard por Año":
+    st.title("📅 Análisis Evolutivo por Año")
+    # Filtramos años válidos (quitamos NaT)
+    años_disponibles = sorted(df_raw['Año_Envasado'].dropna().unique().astype(int), reverse=True)
+    anio = st.sidebar.selectbox("Seleccione Año:", años_disponibles)
+    
+    df_anio = df_raw[df_raw['Año_Envasado'] == anio]
+    st.subheader(f"Resumen del Año {anio}")
+    st.write(f"Se encontraron {len(df_anio)} registros.")
+    st.dataframe(df_anio)
+
+elif app_mode == "Estudio de Vida Útil":
+    st.title("⏱️ Estudio de Vida Útil Real")
+    fig_vida = px.scatter(df_raw, x="Dias_Vida_Real", y="pH", color="Análisis final",
+                          hover_data=['Lote', 'Producto'], title="Degradación de pH vs Días")
+    st.plotly_chart(fig_vida, use_container_width=True)
+
+elif app_mode == "Comparativa de Productos":
+    st.title("⚖️ Comparativa de Estabilidad")
+    productos = sorted(df_raw['Producto'].unique())
+    col1, col2 = st.columns(2)
+    p1 = col1.selectbox("Producto A:", productos, index=0)
+    p2 = col2.selectbox("Producto B:", productos, index=1 if len(productos)>1 else 0)
+    
+    df_comp = df_raw[df_raw['Producto'].isin([p1, p2])]
+    fig_comp = px.violin(df_comp, x="Producto", y="Dias_Vida_Real", color="Producto", box=True)
+    st.plotly_chart(fig_comp, use_container_width=True)
+
+elif app_mode == "Predicción de Riesgo":
+    st.title("🛡️ Sistema de Alerta Temprana")
+    
+    # Lógica de simulación
     df_fallas = df_raw[df_raw['Análisis final'].isin(['RI', 'RD'])]
-    
-    st.sidebar.header("Simulador de Lote")
     producto_sim = st.sidebar.selectbox("Producto a Evaluar:", df_raw['Producto'].unique())
-    envase_sim = st.sidebar.selectbox("Tipo de Envase:", df_raw['Tipo de Envase'].unique())
-    dias_sim = st.sidebar.slider("Días de almacenamiento actual:", 0, 365, 180)
+    dias_sim = st.sidebar.slider("Días de almacenamiento:", 0, 365, 180)
 
-    # 1. Análisis de Riesgo Histórico
-    # Filtramos fallas similares
-    fallas_similares = df_fallas[
-        (df_fallas['Producto'] == producto_sim) & 
-        (df_fallas['Dias_Vida_Real'] <= dias_sim)
-    ]
-
-    # Calcular Score (0 a 100)
-    # Si históricamente el 50% de las fallas de este producto ocurren antes de estos días...
+    # Cálculo de riesgo
+    fallas_similares = df_fallas[(df_fallas['Producto'] == producto_sim) & (df_fallas['Dias_Vida_Real'] <= dias_sim)]
     total_fallas_prod = len(df_fallas[df_fallas['Producto'] == producto_sim])
-    if total_fallas_prod > 0:
-        score = (len(fallas_similares) / total_fallas_prod) * 100
-    else:
-        score = 0
+    score = (len(fallas_similares) / total_fallas_prod * 100) if total_fallas_prod > 0 else 0
 
-    # 2. Visualización del Semáforo
-    st.subheader(f"Resultado del Análisis para: {producto_sim}")
-    
-    if score < 20:
-        st.success(f"**RIESGO BAJO ({score:.1f}%)** - El producto es estable en este periodo.")
-    elif score < 60:
-        st.warning(f"**RIESGO MEDIO ({score:.1f}%)** - Se recomienda realizar análisis sensorial preventivo.")
-    else:
-        st.error(f"**RIESGO ALTO ({score:.1f}%)** - Históricamente, la mayoría de las fallas ocurren antes de este día.")
+    # Semáforo
+    if score < 20: st.success(f"RIESGO BAJO ({score:.1f}%)")
+    elif score < 60: st.warning(f"RIESGO MEDIO ({score:.1f}%)")
+    else: st.error(f"RIESGO ALTO ({score:.1f}%)")
 
-    # 3. Gráfico de "Zona de Peligro"
-    st.subheader("Curva de Probabilidad de Fallo")
-    # Creamos una curva acumulada de fallas por día para ese producto
-    df_prod_falla = df_fallas[df_fallas['Producto'] == producto_sim].sort_values('Dias_Vida_Real')
-    
-    if not df_prod_falla.empty:
-        fig_risk = px.area(df_prod_falla, x='Dias_Vida_Real', 
-                           title=f"Evolución del Riesgo para {producto_sim}",
-                           labels={'Dias_Vida_Real': 'Días de Almacenamiento', 'index': 'Probabilidad'})
-        # Añadir línea vertical del día actual simulado
-        fig_risk.add_vline(x=dias_sim, line_dash="dash", line_color="red", 
-                           annotation_text="Día Actual")
-        st.plotly_chart(fig_risk, use_container_width=True)
-    else:
-        st.info("No hay suficientes datos históricos de fallas para este producto.")
-
-    # 4. Tabla de "Lotes Hermanos" (Muestras que fallaron en condiciones similares)
+    # Historial de fallas
     if not fallas_similares.empty:
-        st.subheader("Muestras Históricas con Fallas Similares")
-        st.write("Estos lotes fallaron en condiciones parecidas a las que estás consultando:")
-        st.table(fallas_similares[['Lote', 'Fecha de Envasado', 'Dias_Vida_Real', 'Análisis final']].head(5))
-
+        st.subheader("Muestras Históricas que fallaron antes de este día")
+        st.table(fallas_similares[['Lote', 'Dias_Vida_Real', 'Análisis final']].head(5))
+        
 # --- Mantenemos las otras secciones para que la app sea completa ---
 else:
     st.info("Utilice el menú lateral para navegar por los dashboards.")
