@@ -261,7 +261,7 @@ elif app_mode == "Estudio de Vida Útil":
     # 1. Limpieza base y preparación de etiquetas de envase
     df_vida_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
     df_vida_base = df_vida_base[df_vida_base['Dias_Vida_Real'] <= 450]
-    df_vida_base['Dias_Vida_Real'] >= 0
+    df_vida_base = df_vida_base[df_vida_base['Dias_Vida_Real'] >= 0]
     df_vida_base['Análisis final'] = df_vida_base['Análisis final'].astype(str).str.strip()
     
     # Diccionario de mapeo para legibilidad
