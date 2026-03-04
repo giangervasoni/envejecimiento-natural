@@ -7,7 +7,13 @@ st.set_page_config(page_title="IA Calidad Alimentos", layout="wide")
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv("Prueba Tableau.csv", encoding='latin1')
+    # Usamos sep=None y engine='python' para que detecte si es coma o punto y coma
+    # on_bad_lines='skip' saltará la línea 396 si está corrupta para que la app no falle
+    df = pd.read_csv("Prueba Tableau.csv", 
+                     encoding='latin1', 
+                     sep=None, 
+                     engine='python', 
+                     on_bad_lines='skip')
     df['Análisis final'] = df['Análisis final'].fillna('OK')
     df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
     df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
