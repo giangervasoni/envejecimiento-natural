@@ -23,6 +23,11 @@ def load_data():
     df['Producto'] = df['Producto'].str.upper()
     # 2. Eliminar espacios en blanco sobrantes al inicio y al final
     df['Producto'] = df['Producto'].str.strip()
+    df['Producto'] = df['Producto'].replace({
+        'AVENA INSTANTANEA': 'AVENA INSTANTÁNEA',
+        'AVENA HARINA': 'AVENA INSTANTÁNEA'
+    }, regex=True)
+    
     # Ingeniería de Características (Features)
     df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
     df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
