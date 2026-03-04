@@ -178,16 +178,30 @@ elif app_mode == "Dashboard por Año":
         st.warning("⚠️ **No es posible saber la distribución de las líneas de producción debido a que los datos no fueron registrados.**")
     st.divider()
 
-    # --- SECCIÓN 4: ENVASES (BARRAS APILADAS AL 100%) ---
+# --- SECCIÓN 4: ENVASES (BARRAS APILADAS AL 100%) ---
     st.markdown("### 4️⃣ Proporción de Tipo de Envase (Porcentaje)")
-    # Creamos un dataframe agrupado para calcular porcentajes
+    
+    # Agrupamos y contamos
     df_env_pct = df_anio.groupby(['Mes', 'Tipo de Envase']).size().reset_index(name='Conteo')
-    fig4 = px.bar(df_env_pct, x="Mes", y="Conteo", color="Tipo de Envase",
-                  title="Composición del empaque por mes (100% apilado)",
-                  category_orders={"Mes": orden_meses},
-                  barnorm='percent') # Esto hace que sea apilado al 100%
-    st.plotly_chart(fig4, use_container_width=True)
-    st.divider()
+    
+    if not df_env_pct.empty:
+        # Aseguramos que Conteo sea numérico por si acaso
+        df_env_pct['Conteo'] = pd.to_numeric(df_env_pct['Conteo'])
+        
+        fig4 = px.bar(df_env_pct, 
+                      x="Mes", 
+                      y="Conteo", 
+                      color="Tipo de Envase",
+                      title=f"Composición del empaque por mes ({anio_sel})",
+                      category_orders={"Mes": orden_meses},
+                      barnorm='percent',  # Esto crea el efecto 100% apilado
+                      text_auto='.1f')    # Muestra el % dentro de las barras
+        
+        # Ajustamos el layout para que el eje Y diga Porcentaje
+        fig4.update_layout(yaxis_title="Porcentaje (%)")
+        st.plotly_chart(fig4, use_container_width=True)
+    else:
+        st.info("No hay datos de envases para este año.")
 
     # --- SECCIÓN 5: DICTÁMENES ---
     st.markdown("### 5️⃣ Ensayos según Dictamen")
@@ -198,20 +212,29 @@ elif app_mode == "Dashboard por Año":
     st.plotly_chart(fig5, use_container_width=True)
     st.divider()
 
-    # --- SECCIÓN 6: HEATMAP DE FALLAS (CALOR) ---
+   # --- SECCIÓN 6: HEATMAP DE FALLAS (CALOR) ---
     st.markdown("### 🔥 Mapa de Calor: Riesgo Crítico (RI/RD)")
-    df_fallas = df_anio[df_anio['Análisis final'].isin(['RI', 'RD'])]
+    
+    # Filtramos solo las fallas
+    df_fallas = df_anio[df_anio['Análisis final'].isin(['RI', 'RD'])].copy()
     
     if not df_fallas.empty:
-        # Agrupamos por Producto y Mes para ver la densidad de fallas
+        # Agrupamos asegurando que no queden índices raros
         df_heat = df_fallas.groupby(['Producto', 'Mes']).size().reset_index(name='Fallas')
-        fig_heat = px.density_heatmap(df_heat, x="Mes", y="Producto", z="Fallas",
-                                      color_continuous_scale="Reds",
-                                      title="Concentración de casos de Rancidez",
-                                      category_orders={"Mes": orden_meses})
+        
+        fig_heat = px.density_heatmap(
+            df_heat, 
+            x="Mes", 
+            y="Producto", 
+            z="Fallas",
+            color_continuous_scale="Reds",
+            title="Concentración de casos de Rancidez por Producto y Mes",
+            category_orders={"Mes": orden_meses},
+            text_auto=True # Muestra el número de fallas en el cuadradito
+        )
         st.plotly_chart(fig_heat, use_container_width=True)
     else:
-        st.success("✅ **Excelente:** No se registraron fallas (RI/RD) en este año para generar el mapa de calor.")
+        st.success(f"✅ No se detectaron fallas críticas (RI/RD) en el año {anio_sel}.")
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
