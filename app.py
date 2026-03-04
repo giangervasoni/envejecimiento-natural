@@ -18,7 +18,11 @@ def load_data():
     df['Análisis final'] = df['Análisis final'].fillna('OK')
     df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
     df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
-    
+    # --- PROCESO DE UNIFICACIÓN DE NOMBRES ---
+    # 1. Convertir todo a MAYÚSCULAS para evitar duplicados por minúsculas
+    df['Producto'] = df['Producto'].str.upper()
+    # 2. Eliminar espacios en blanco sobrantes al inicio y al final
+    df['Producto'] = df['Producto'].str.strip()
     # Ingeniería de Características (Features)
     df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
     df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
