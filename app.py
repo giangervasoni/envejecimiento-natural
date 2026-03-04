@@ -53,7 +53,7 @@ app_mode = st.sidebar.selectbox("Seleccione el Dashboard",
 
 # --- LÓGICA DE VISUALIZACIÓN ---
 
-elif app_mode == "Dashboard General":
+if app_mode == "Dashboard General":
     st.title("🔬 Dashboard General de Calidad")
     
     # --- FILTROS GLOBALES PARA DASHBOARD GENERAL ---
