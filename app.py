@@ -35,7 +35,6 @@ def load_data():
     
     # Ingeniería de Características (Features)
     df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
-    df['Dias_Vida_Real'] >= 0
     df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
     
     mapa_envase = {'P': 'Pouch', 'E': 'Estuche', 'G': 'Granel'}
