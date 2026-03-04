@@ -57,7 +57,6 @@ app_mode = st.sidebar.selectbox("Seleccione el Dashboard",
                                  "Predicción de Riesgo"])
 
 # --- LÓGICA DE VISUALIZACIÓN ---
-
 if app_mode == "Dashboard General":
     st.title("🔬 Dashboard General de Calidad")
     
@@ -130,15 +129,75 @@ if app_mode == "Dashboard General":
         st.info("No hay datos para la combinación de envase/año seleccionada.")
 
 elif app_mode == "Dashboard por Año":
-    st.title("📅 Análisis Evolutivo por Año")
-    # Filtramos años válidos (quitamos NaT)
-    años_disponibles = sorted(df_raw['Año_Envasado'].dropna().unique().astype(int), reverse=True)
-    anio = st.sidebar.selectbox("Seleccione Año:", años_disponibles)
+    st.title("📅 Análisis Evolutivo Anual")
     
-    df_anio = df_raw[df_raw['Año_Envasado'] == anio]
-    st.subheader(f"Resumen del Año {anio}")
-    st.write(f"Se encontraron {len(df_anio)} registros.")
-    st.dataframe(df_anio)
+    # 1. Filtro de Año (usamos la columna que creamos en load_data)
+    años_disponibles = sorted(df_raw['Año_Envasado'].dropna().unique().astype(int), reverse=True)
+    anio_sel = st.sidebar.selectbox("Seleccione Año de Elaboración:", años_disponibles)
+    
+    # Filtrado por año
+    df_anio = df_raw[df_raw['Año_Envasado'] == anio_sel].copy()
+    
+    # Extraemos el mes y el nombre del mes para el eje X
+    df_anio['Mes_Num'] = df_anio['Fecha de Envasado'].dt.month
+    df_anio['Mes'] = df_anio['Fecha de Envasado'].dt.month_name()
+    # Ordenamos por número de mes para que el gráfico sea cronológico
+    df_anio = df_anio.sort_values('Mes_Num')
+
+    st.subheader(f"📊 Reporte Consolidado - Temporada {anio_sel}")
+
+    # --- FILA 1 ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### 1. Productos por Mes")
+        fig1 = px.histogram(df_anio, x="Mes", color="Producto", 
+                            title=f"Volumen de productos en {anio_sel}",
+                            category_orders={"Mes": ["January", "February", "March", "April", "May", "June", 
+                                                      "July", "August", "September", "October", "November", "December"]})
+        st.plotly_chart(fig1, use_container_width=True)
+
+    with col2:
+        st.markdown("### 2. Destinos por Mes")
+        # Asumiendo que tu columna se llama 'Destino'
+        if 'Destino' in df_anio.columns:
+            fig2 = px.bar(df_anio.groupby(['Mes', 'Destino']).size().reset_index(name='Cant'), 
+                          x="Mes", y="Cant", color="Destino", title="Distribución de Mercado")
+            st.plotly_chart(fig2, use_container_width=True)
+        else:
+            st.info("Columna 'Destino' no encontrada en el CSV.")
+
+    st.divider()
+
+    # --- FILA 2 ---
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown("### 3. Muestras por Envasadora")
+        # Asumiendo que tu columna se llama 'Envasadora' o similar
+        col_env = 'Envasadora' if 'Envasadora' in df_anio.columns else 'P/E/G' 
+        fig3 = px.pie(df_anio, names=col_env, hole=0.4, title="Participación de Líneas de Producción")
+        st.plotly_chart(fig3, use_container_width=True)
+
+    with col4:
+        st.markdown("### 4. Envases por Mes")
+        fig4 = px.bar(df_anio, x="Mes", color="Tipo de Envase", barmode="group",
+                      title="Proporción de Empaque Mensual")
+        st.plotly_chart(fig4, use_container_width=True)
+
+    st.divider()
+
+    # --- FILA 3 (Ancho completo) ---
+    st.markdown("### 5. Dictámenes Críticos por Mes")
+    # Análisis final: OK vs RI/RD
+    fig5 = px.area(df_anio.groupby(['Mes', 'Análisis final']).size().reset_index(name='Total'),
+                   x="Mes", y="Total", color="Análisis final", 
+                   title="Evolución de Calidad (Dictámenes)",
+                   color_discrete_map={'OK': 'green', 'RI': 'orange', 'RD': 'red'})
+    st.plotly_chart(fig5, use_container_width=True)
+
+    with st.expander("🔍 Ver datos crudos del año seleccionado"):
+        st.dataframe(df_anio)
 
 elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real")
