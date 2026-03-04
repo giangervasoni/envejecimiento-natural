@@ -243,7 +243,7 @@ elif app_mode == "Dashboard por Año":
     else:
         st.success(f"✅ No se registraron fallas críticas en {anio_sel}.")
 
-elif app_mode == "Estudio de Vida Útil":
+# elif app_mode == "Estudio de Vida Útil":
     st.title("⏱️ Estudio de Vida Útil Real (Límite 450 días)")
     st.caption("Nota: Las muestras son descartadas a los 15 meses (450 días) por política de espacio en sala.")
     
@@ -328,14 +328,84 @@ elif app_mode == "Estudio de Vida Útil":
         
 elif app_mode == "Comparativa de Productos":
     st.title("⚖️ Comparativa de Estabilidad")
-    productos = sorted(df_raw['Producto'].unique())
-    col1, col2 = st.columns(2)
-    p1 = col1.selectbox("Producto A:", productos, index=0)
-    p2 = col2.selectbox("Producto B:", productos, index=1 if len(productos)>1 else 0)
+    st.markdown("""
+    Esta sección compara la **resistencia a la rancidez** entre dos productos. 
+    Permite identificar cuál de los dos es más estable bajo las mismas condiciones de almacenamiento.
+    """)
     
-    df_comp = df_raw[df_raw['Producto'].isin([p1, p2])]
-    fig_comp = px.violin(df_comp, x="Producto", y="Dias_Vida_Real", color="Producto", box=True)
-    st.plotly_chart(fig_comp, use_container_width=True)
+    # 1. Preparación de datos (incluyendo el límite de 450 días)
+    df_comp_base = df_raw.dropna(subset=['Dias_Vida_Real', 'Análisis final']).copy()
+    df_comp_base = df_comp_base[(df_comp_base['Dias_Vida_Real'] >= 0) & (df_comp_base['Dias_Vida_Real'] <= 450)]
+    
+    productos = sorted(df_comp_base['Producto'].unique())
+    col1, col2 = st.columns(2)
+    p1 = col1.selectbox("Producto A (Referencia):", productos, index=0)
+    p2 = col2.selectbox("Producto B (Comparación):", productos, index=1 if len(productos)>1 else 0)
+    
+    df_selection = df_comp_base[df_comp_base['Producto'].isin([p1, p2])]
+    
+    if not df_selection.empty:
+        # --- GRÁFICO DE VIOLÍN/BOXPLOT ---
+        # El gráfico de violín muestra la densidad (donde hay más muestras)
+        fig_comp = px.violin(df_selection, 
+                             x="Producto", 
+                             y="Dias_Vida_Real", 
+                             color="Análisis final", 
+                             box=True, 
+                             points="all",
+                             hover_data=['Lote', 'Envasadora'],
+                             title=f"Distribución de estabilidad: {p1} vs {p2}",
+                             color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+        
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+        # --- PANEL DE EXPLICABILIDAD (Para Stakeholders) ---
+        st.info("### 💡 Cómo interpretar este gráfico")
+        exp_col1, exp_col2 = st.columns(2)
+        
+        with exp_col1:
+            st.markdown("""
+            **1. Los Puntos (Muestras):**
+            * Cada punto es un análisis real. 
+            * Si ves puntos **rojos (RD)** muy abajo (pocos días), ese producto tiene baja estabilidad.
+            
+            **2. La Caja (Estadística):**
+            * La línea central de la caja es la **Mediana**. 
+            * Si la caja de un producto es más alta que la del otro, significa que suele durar más tiempo 'OK'.
+            """)
+            
+        with exp_col2:
+            st.markdown("""
+            **3. El Violín (Densidad):**
+            * Las partes "gordas" del dibujo indican dónde se concentran la mayoría de tus análisis.
+            * Si el violín es ancho cerca de los 400 días, el producto es muy confiable.
+            """)
+
+        # --- TABLA COMPARATIVA DE MÉTRICAS ---
+        st.divider()
+        st.subheader("📊 Resumen Ejecutivo")
+        
+        # Cálculo de métricas para la tabla
+        def get_metrics(prod_name):
+            d = df_selection[df_selection['Producto'] == prod_name]
+            total = len(d)
+            fallas = len(d[d['Análisis final'].isin(['RI', 'RD'])])
+            tasa_falla = (fallas / total * 100) if total > 0 else 0
+            max_ok = d[d['Análisis final'] == 'OK']['Dias_Vida_Real'].max()
+            return total, tasa_falla, max_ok
+
+        m1 = get_metrics(p1)
+        m2 = get_metrics(p2)
+
+        resumen_data = {
+            "Métrica": ["Muestras Totales", "Tasa de Incidencia (RI/RD)", "Máxima Vida OK observada"],
+            p1: [f"{m1[0]}", f"{m1[1]:.1f}%", f"{m1[2]} días"],
+            p2: [f"{m2[0]}", f"{m2[1]:.1f}%", f"{m2[2]} días"]
+        }
+        st.table(pd.DataFrame(resumen_data))
+
+    else:
+        st.warning("No hay datos suficientes para comparar estos productos.")
 
 elif app_mode == "Predicción de Riesgo":
     st.title("🛡️ Sistema de Alerta Temprana")
