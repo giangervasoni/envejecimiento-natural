@@ -1,4 +1,4 @@
-# 🤖 Panel de Gestión de Calidad AI
+# 🤖 Panel de Gestión de Calidad
 
 Este proyecto es una plataforma interactiva desarrollada para el monitoreo y análisis de control de calidad. Se divide en dos módulos principales:
 
