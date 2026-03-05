@@ -200,7 +200,7 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
                 st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
 
-else if area_trabajo == "Generador de Informes IA":
+elif area_trabajo == "Generador de Informes IA":
     st.title("🧠 Auditoría Inteligente")
     
     if df_lab.empty:
