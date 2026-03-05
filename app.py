@@ -39,8 +39,8 @@ ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
 # Intenta obtener el token de secrets o usa una cadena vacía para manual
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 
-# URL Estándar de Inference API para Llama 3.1 8B
-HF_API_URL = "https://api-inference.huggingface.co/models/meta-llama/Meta-Llama-3.1-8B-Instruct"
+# URL ACTUALIZADA: Hugging Face ahora requiere router.huggingface.co
+HF_API_URL = "https://router.huggingface.co/hf-inference/models/meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 # --- LÓGICA DE CONTROL DE CUOTA ---
 def verificar_cuota():
@@ -146,10 +146,10 @@ if area_trabajo == "📦 Materias Primas":
         if anio_sel != "Todos": df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
         if insumo_sel: df_f = df_f[df_f['Materia Prima'].isin(insumo_sel)]
         
-        st.dataframe(df_f, use_container_width=True, hide_index=True)
+        st.dataframe(df_f, width="stretch", hide_index=True)
         if not df_f.empty:
             fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', category_orders={"Mes_Nombre": ORDEN_MESES})
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 elif area_trabajo == "🧠 Informe con IA":
     st.title("🧠 Auditoría de Calidad Asistida")
@@ -178,8 +178,8 @@ else: # Laboratorio
         tab1, tab2 = st.tabs(["📊 Distribución", "📈 Evolución Temporal"])
         with tab1:
             fig_pie = px.pie(df_f, names='Análisis final', title="Estado Sensorial de Muestras")
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, width="stretch")
         with tab2:
             fig_scat = px.scatter(df_f, x='Dias_Vida_Real', y='Producto', color='Análisis final', 
                                  color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-            st.plotly_chart(fig_scat, use_container_width=True)
+            st.plotly_chart(fig_scat, width="stretch")
