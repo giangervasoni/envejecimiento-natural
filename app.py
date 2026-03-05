@@ -247,8 +247,8 @@ elif area_trabajo == "🔬 Laboratorio":
             else:
                 st.success("✅ No se detectan fallas en la selección actual.")
 
-elif area_trabajo == "🧠 Generador de Informes IA":
-    st.title("🧠 Auditoría Inteligente con Gemini")
+elif area_trabajo == "🧠 Generador de Informes":
+    st.title("🧠 Auditoría Inteligente")
     if df_lab.empty:
         st.warning("Debe cargar datos en Laboratorio primero.")
     else:
