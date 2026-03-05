@@ -6,8 +6,8 @@ def download_csv():
     """
     Descarga el archivo CSV desde Google Drive usando el ID de exportación directa.
     """
-    # ID de tu archivo de Google Drive: 1upIy7kzzeiFuYrIuZzSP1os_70NEe1MK
-    file_id = '1HOgAb3_EG8R44RrFkZtxqIFTKHGmnXqy'
+  # ID de tu archivo de Google Drive: 1upIy7kzzeiFuYrIuZzSP1os_70NEe1MK
+    file_id = '1upIy7kzzeiFuYrIuZzSP1os_70NEe1MK'
     
     # URL de descarga directa (UC = User Content)
     url = f'https://drive.google.com/uc?export=download&id={file_id}'
