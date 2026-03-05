@@ -4,6 +4,22 @@ import plotly.express as px
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
 st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
+Estilos CSS para el informe y la UI
+
+st.markdown("""
+<style>
+.informe-tecnico {
+background-color: white;
+padding: 45px;
+border-radius: 4px;
+border: 1px solid #d1d5db;
+box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+font-family: 'serif';
+color: #111827;
+line-height: 1.7;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Definición de constantes al más alto nivel para evitar NameError
 MESES_ES = {
