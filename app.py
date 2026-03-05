@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
-st.set_page_config(page_title="Gestión de Calidad | BioCalidad", layout="wide", page_icon="🔬")
+st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
 
 # Estilos CSS para el informe y la UI profesional
 st.markdown("""
@@ -98,15 +98,15 @@ def load_data_materias_primas():
 # 3. LÓGICA DE IA (GEMINI 2.5 FLASH)
 
 def generar_reporte_ia(datos_contexto):
-    """Genera un informe profesional usando la API de Gemini con manejo de errores 403 y retries."""
+    """Genera un informe profesional usando la API de Gemini con manejo de errores y retries."""
     const_apiKey = "" # La clave de API se inyecta automáticamente en tiempo de ejecución
     
-    # URL actualizada al modelo soportado para evitar 403 por modelo inexistente
+    # URL del modelo estable
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={const_apiKey}"
     
     system_prompt = (
         "Eres un Director de Aseguramiento de Calidad Científico. Redacta informes técnicos detallados. "
-        "Usa un tono formal y académico. Estructura: 1. Resumen, 2. Desviaciones detectadas, 3. Conclusiones técnicas, 4. Protocolos de Seguridad Alimentaria."
+        "Usa un tono formal. Estructura: 1. Resumen, 2. Desviaciones detectadas, 3. Conclusiones técnicas."
     )
     
     payload = {
@@ -118,27 +118,30 @@ def generar_reporte_ia(datos_contexto):
         }
     }
 
-    # Implementación de reintentos con backoff exponencial
+    # Implementación de reintentos con backoff exponencial para evitar errores temporales de conexión o cuota
     for i in range(5):
         try:
             response = requests.post(url, json=payload, timeout=30)
             
             if response.status_code == 200:
                 result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Sin respuesta")
+                text_response = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "")
+                if text_response:
+                    return text_response
+                return "La IA devolvió una respuesta vacía."
             
-            # Si hay error 403, 429 o 500, esperamos y reintentamos
+            # Si hay error 403, 429 o 5xx, esperamos y reintentamos
             if response.status_code in [403, 429, 500, 503]:
                 wait_time = (2 ** i) # 1s, 2s, 4s, 8s, 16s
                 time.sleep(wait_time)
                 continue
             else:
-                return f"Error crítico en API (Código {response.status_code})"
+                return f"Error en la comunicación con la IA (Código {response.status_code})."
                 
-        except Exception as e:
+        except (requests.exceptions.RequestException, Exception):
             time.sleep(2 ** i)
             
-    return "No se pudo contactar con el servicio de IA tras varios intentos. Por favor, verifique su conexión o permisos."
+    return "No se pudo establecer conexión con el servicio de IA tras varios intentos. Verifique si la clave de API es válida o si hay restricciones de red."
 
 # 4. BARRA LATERAL Y NAVEGACIÓN
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
