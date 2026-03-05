@@ -39,7 +39,7 @@ ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
 # Intenta obtener el token de secrets o usa una cadena vacía para manual
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 
-# URL ACTUALIZADA: Hugging Face ahora requiere router.huggingface.co
+# URL ACTUALIZADA: Hugging Face ahora requiere router.huggingface.co para evitar errores 404/410
 HF_API_URL = "https://router.huggingface.co/hf-inference/models/meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 # --- LÓGICA DE CONTROL DE CUOTA ---
@@ -104,6 +104,8 @@ def llamar_ia_calidad(prompt_texto):
                 res_json = response.json()
                 if isinstance(res_json, list) and len(res_json) > 0:
                     return res_json[0].get('generated_text', "No se pudo extraer el texto.")
+                elif isinstance(res_json, dict) and 'generated_text' in res_json:
+                    return res_json['generated_text']
                 return str(res_json)
             elif response.status_code in [429, 503]:
                 time.sleep(2 ** i)
@@ -161,9 +163,9 @@ elif area_trabajo == "🧠 Informe con IA":
         
         if st.button("Generar Informe Técnico"):
             if peticiones_actuales < 15:
-                with st.spinner("Llama-3 analizando tendencias de estabilidad..."):
+                with st.spinner(f"Llama-3 analizando tendencias para {prod_target}..."):
                     resumen_datos = df_prod[['Dias_Vida_Real', 'Análisis final']].tail(15).to_string(index=False)
-                    prompt = f"Analiza estos datos de estabilidad del producto {prod_target}:\n{resumen_datos}\nDetermina si hay riesgo de rancidez y recomienda acciones."
+                    prompt = f"Analiza estos datos de estabilidad del producto {prod_target}:\n{resumen_datos}\nDetermina si hay riesgo de rancidez y recomienda acciones profesionales."
                     respuesta = llamar_ia_calidad(prompt)
                     st.markdown(f"<div class='informe-tecnico'>{respuesta}</div>", unsafe_allow_html=True)
             else:
