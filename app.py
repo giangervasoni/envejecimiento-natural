@@ -20,6 +20,7 @@ st.markdown("""
     color: #1f2937;
     line-height: 1.6;
     margin-top: 20px;
+    border: 1px solid #e5e7eb;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -36,11 +37,14 @@ ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # --- CONFIGURACIÓN DE IA (Hugging Face) ---
-# Intenta obtener el token de secrets o usa una cadena vacía para manual
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 
-# URL ACTUALIZADA: Hugging Face ahora requiere router.huggingface.co para evitar errores 404/410
-HF_API_URL = "https://router.huggingface.co/hf-inference/models/meta-llama/Meta-Llama-3.1-8B-Instruct"
+# Lista de modelos para redundancia (si uno da 404, probamos el siguiente)
+MODELOS_HF = [
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "meta-llama/Llama-2-7b-chat-hf",
+    "mistralai/Mistral-7B-Instruct-v0.3"
+]
 
 # --- LÓGICA DE CONTROL DE CUOTA ---
 def verificar_cuota():
@@ -55,10 +59,12 @@ def verificar_cuota():
 @st.cache_data
 def load_data_laboratorio():
     try:
+        # Intentamos cargar el archivo local que sincroniza GitHub Actions
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
         for col in ['Fecha de Envasado', 'Fecha de análisis']:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], errors='coerce')
+                # Especificamos dayfirst=True para evitar los warnings de inferencia de formato
+                df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
         
         if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
             df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
@@ -66,7 +72,8 @@ def load_data_laboratorio():
         df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
         df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
         return df
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al cargar Laboratorio: {e}")
         return pd.DataFrame()
 
 @st.cache_data
@@ -80,7 +87,8 @@ def load_data_materias_primas():
             df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
         df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
         return df_mp
-    except Exception:
+    except Exception as e:
+        st.error(f"Error al cargar Materias Primas: {e}")
         return pd.DataFrame()
 
 # --- COMUNICACIÓN CON IA ---
@@ -90,30 +98,38 @@ def llamar_ia_calidad(prompt_texto):
     
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     
-    # Formato optimizado para Llama-3 Instruct
-    payload = {
-        "inputs": f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nEres un Director de Calidad experto en alimentos. Generas informes técnicos y breves.<|eot_id|><|start_header_id|>user<|end_header_id|>\n{prompt_texto}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
-        "parameters": {"max_new_tokens": 500, "temperature": 0.7, "return_full_text": False}
-    }
-    
-    try:
-        for i in range(3):
-            response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=20)
+    # Probamos con la lista de modelos para evitar el error 404
+    for model_path in MODELOS_HF:
+        api_url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
+        
+        # Formato optimizado
+        payload = {
+            "inputs": f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nEres un Director de Calidad experto en alimentos. Generas informes técnicos y breves.<|eot_id|><|start_header_id|>user<|end_header_id|>\n{prompt_texto}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
+            "parameters": {"max_new_tokens": 500, "temperature": 0.7}
+        }
+        
+        try:
+            response = requests.post(api_url, headers=headers, json=payload, timeout=25)
             if response.status_code == 200:
                 st.session_state.ai_requests.append(datetime.now())
                 res_json = response.json()
                 if isinstance(res_json, list) and len(res_json) > 0:
-                    return res_json[0].get('generated_text', "No se pudo extraer el texto.")
+                    return res_json[0].get('generated_text', "Error al extraer texto.")
                 elif isinstance(res_json, dict) and 'generated_text' in res_json:
                     return res_json['generated_text']
                 return str(res_json)
+            elif response.status_code == 404:
+                # Si el modelo no existe o no está cargado, intentamos con el siguiente de la lista
+                continue
             elif response.status_code in [429, 503]:
-                time.sleep(2 ** i)
+                time.sleep(2)
+                continue
             else:
-                return f"❌ Error de API ({response.status_code}): {response.text}"
-        return "⚠️ La API está saturada. Intente de nuevo en unos segundos."
-    except Exception as e:
-        return f"❌ Error de conexión: {str(e)}"
+                return f"❌ Error de API ({response.status_code}) en {model_path}: {response.text}"
+        except Exception as e:
+            continue
+            
+    return "⚠️ Ninguno de los modelos de IA está disponible en este momento. Intenta más tarde."
 
 # 3. INTERFAZ Y NAVEGACIÓN
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
@@ -163,7 +179,7 @@ elif area_trabajo == "🧠 Informe con IA":
         
         if st.button("Generar Informe Técnico"):
             if peticiones_actuales < 15:
-                with st.spinner(f"Llama-3 analizando tendencias para {prod_target}..."):
+                with st.spinner(f"Analizando tendencias para {prod_target}..."):
                     resumen_datos = df_prod[['Dias_Vida_Real', 'Análisis final']].tail(15).to_string(index=False)
                     prompt = f"Analiza estos datos de estabilidad del producto {prod_target}:\n{resumen_datos}\nDetermina si hay riesgo de rancidez y recomienda acciones profesionales."
                     respuesta = llamar_ia_calidad(prompt)
