@@ -136,7 +136,7 @@ def generar_reporte_ia(datos_contexto):
 
 # 4. BARRA LATERAL Y NAVEGACIÓN
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
-st.sidebar.title("🔬 Gestión de Calidad AI")
+st.sidebar.title("🔬 Gestión de Calidad")
 
 area_trabajo = st.sidebar.radio(
     "Seleccione el sector:",
@@ -268,7 +268,7 @@ elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
                 st.success("✅ Estabilidad garantizada en los rangos actuales analizados.")
 
 elif area_trabajo == "📝 Generador IA":
-    st.title("📝 Redacción Académica de Informes")
+    st.title("📝 Redacción de Informes")
     st.info("Utilice este módulo para transformar los datos crudos en un informe profesional para gerencia.")
     
     fuente = st.selectbox("Fuente de Datos para el informe:", ["Suministros", "Laboratorio"])
