@@ -101,7 +101,6 @@ def generar_reporte_ia(datos_contexto):
     """Genera un informe profesional usando la API de Gemini con manejo de errores y retries."""
     const_apiKey = "" # La clave de API se inyecta automáticamente en tiempo de ejecución
     
-    # URL del modelo estable
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={const_apiKey}"
     
     system_prompt = (
@@ -118,7 +117,7 @@ def generar_reporte_ia(datos_contexto):
         }
     }
 
-    # Implementación de reintentos con backoff exponencial para evitar errores temporales de conexión o cuota
+    # Implementación de reintentos con backoff exponencial
     for i in range(5):
         try:
             response = requests.post(url, json=payload, timeout=30)
@@ -130,18 +129,19 @@ def generar_reporte_ia(datos_contexto):
                     return text_response
                 return "La IA devolvió una respuesta vacía."
             
-            # Si hay error 403, 429 o 5xx, esperamos y reintentamos
-            if response.status_code in [403, 429, 500, 503]:
-                wait_time = (2 ** i) # 1s, 2s, 4s, 8s, 16s
+            if response.status_code in [403, 429, 500, 503, 504]:
+                wait_time = (2 ** i)
                 time.sleep(wait_time)
                 continue
             else:
-                return f"Error en la comunicación con la IA (Código {response.status_code})."
+                return f"Error en la comunicación con la IA (Código HTTP {response.status_code})."
                 
-        except (requests.exceptions.RequestException, Exception):
+        except (requests.exceptions.RequestException, Exception) as e:
             time.sleep(2 ** i)
+            if i == 4:
+                return f"Error crítico de conexión: {str(e)}."
             
-    return "No se pudo establecer conexión con el servicio de IA tras varios intentos. Verifique si la clave de API es válida o si hay restricciones de red."
+    return "No se pudo contactar con el servicio de IA tras varios intentos. Verifique su conexión o permisos."
 
 # 4. BARRA LATERAL Y NAVEGACIÓN
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
@@ -183,13 +183,14 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
             m2.metric("Insumos Únicos", df_f['Materia Prima'].nunique())
             m3.metric("Último Ingreso", str(df_f['Fecha de Ingreso'].max().date()) if not df_f.empty else "N/A")
             
-            st.dataframe(df_f, use_container_width=True, hide_index=True)
+            # Cambiado use_container_width por width='stretch' según logs
+            st.dataframe(df_f, width='stretch', hide_index=True)
             
             if not df_f.empty:
                 fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
                                    title="Volumen de Muestreo Mensual",
                                    category_orders={"Mes_Nombre": ORDEN_MESES})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
         with tab_sum2:
             st.subheader("Comparación de Análisis por Mes (Histórico)")
@@ -203,10 +204,10 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 fig_inter = px.line(df_counts, x='Mes_Nombre', y='Cantidad', color='Año_Ingreso',
                                     markers=True, title=f"Evolución Interanual",
                                     category_orders={"Mes_Nombre": ORDEN_MESES})
-                st.plotly_chart(fig_inter, use_container_width=True)
+                st.plotly_chart(fig_inter, width='stretch')
                 
                 pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
-                st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
+                st.dataframe(pivot_df.fillna(0).astype(int), width='stretch')
 
 elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
     st.title("🔬 Análisis de Vida Útil Natural")
@@ -239,9 +240,9 @@ elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
                 fig_pie = px.pie(status_counts, values='count', names='Análisis final', 
                                  color='Análisis final',
                                  color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, width='stretch')
             with c2:
-                st.dataframe(df_lab_f[['Producto', 'Fecha de Envasado', 'Dias_Vida_Real', 'Análisis final']].sort_values('Dias_Vida_Real', ascending=False), use_container_width=True, hide_index=True)
+                st.dataframe(df_lab_f[['Producto', 'Fecha de Envasado', 'Dias_Vida_Real', 'Análisis final']].sort_values('Dias_Vida_Real', ascending=False), width='stretch', hide_index=True)
 
         with tab2:
             st.subheader("Evolución de la Estabilidad")
@@ -250,20 +251,19 @@ elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
                                          title="Días de Vida Útil vs Resultado",
                                          color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
                 fig_scatter.add_vline(x=300, line_dash="dash", line_color="orange")
-                st.plotly_chart(fig_scatter, use_container_width=True)
+                st.plotly_chart(fig_scatter, width='stretch')
 
 elif area_trabajo == "📝 Generador IA":
-    st.title("📝 Redacción Académica de Informes")
-    st.info("Utilice este módulo para transformar los datos crudos en un informe profesional para gerencia.")
+    st.title("📝 Redacción de Informes")
+    st.info("Utilice este módulo para transformar los datos crudos en un informe profesional.")
     
     fuente = st.selectbox("Fuente de Datos para el informe:", ["Suministros", "Laboratorio"])
     
-    if st.button("✨ GENERAR INFORME TÉCNICO", use_container_width=True):
+    if st.button("✨ GENERAR INFORME TÉCNICO", width='stretch'):
         df_ia = load_data_materias_primas() if fuente == "Suministros" else load_data_laboratorio()
         
         if not df_ia.empty:
-            with st.spinner("Analizando tendencias y redactando informe científico..."):
-                # Tomamos una muestra representativa para no saturar el prompt
+            with st.spinner("Analizando tendencias y redactando informe..."):
                 contexto_datos = df_ia.head(40).to_string(index=False)
                 informe = generar_reporte_ia(contexto_datos)
                 
