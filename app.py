@@ -66,6 +66,7 @@ def load_materias_primas():
         # Normalización de nombres de Materia Prima para filtros limpios
         # Convertimos a Título (ej: "miel" -> "Miel") para agrupar correctamente
         df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
+        df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
         
         return df_mp
     except Exception as e:
@@ -78,27 +79,93 @@ df_mp_raw = load_materias_primas()
 # 2. NAVEGACIÓN LATERAL
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=50)
 st.sidebar.title("🤖 Gestión de calidad")
+# Separación clara de Áreas de Trabajo
+st.sidebar.markdown("### 🛠️ Área de Trabajo")
+area_trabajo = st.sidebar.radio(
+    "Seleccione el sector:",
+    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Análisis Vida Útil)"]
+)
+
 # Indicadores de datos
 total_muestras = len(df_raw)
 ultima_fecha = df_raw['Fecha de análisis'].max().strftime('%d/%m/%Y')
 
-# Sección de Materias Primas
-st.sidebar.markdown("---")
-st.sidebar.subheader("📦 Suministros")
-ver_materias_primas = st.sidebar.checkbox("Ver Materias Primas", value=False)
+# 3. LÓGICA POR ÁREA
+if area_trabajo == "📦 Suministros (Materias Primas)":
+    # --- SECCIÓN MATERIAS PRIMAS ---
+    df_mp_raw = load_materias_primas()
+    
+    st.title("📦 Gestión de Materias Primas")
+    st.markdown("Panel de trazabilidad y control de ingresos a planta.")
 
-# Sección de Dashboards de Análisis
-st.sidebar.info(f"""
-**📊 Estado del Dataset:**
-- Total muestras: `{total_muestras}`
-- Último análisis: `{ultima_fecha}`
-""")
-app_mode = st.sidebar.selectbox("Seleccione el Dashboard", 
-                                ["Dashboard General", 
-                                 "Dashboard por Año", 
-                                 "Estudio de Vida Útil", 
-                                 "Comparativa de Productos", 
-                                 "Predicción de Riesgo"])
+    if df_mp_raw.empty:
+        st.error("⚠️ Error: No se pudo cargar 'Materia prima.csv'.")
+    else:
+        st.markdown("### 🔍 Filtros")
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            años_validos = sorted([a for a in df_mp_raw['Año_Ingreso'].unique() if 2020 <= a <= 2026], reverse=True)
+            año_sel = st.selectbox("Filtrar por Año:", ["Todos"] + años_validos)
+        with c2:
+            productos_lista = sorted(df_mp_raw['Materia Prima'].unique())
+            prod_sel = st.multiselect("Filtrar por Ingrediente:", productos_lista)
+
+        df_f = df_mp_raw.copy()
+        if año_sel != "Todos":
+            df_f = df_f[df_f['Año_Ingreso'] == año_sel]
+        if prod_sel:
+            df_f = df_f[df_f['Materia Prima'].isin(prod_sel)]
+
+        st.divider()
+        if not df_f.empty:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Lotes Ingresados", len(df_f))
+            m2.metric("Insumos Distintos", df_f['Materia Prima'].nunique())
+            ultima = df_f['Fecha de Ingreso'].max()
+            m3.metric("Última Recepción", ultima.strftime('%d/%m/%Y') if pd.notnull(ultima) else "N/A")
+
+            st.subheader("📋 Detalle de Ingresos")
+            st.dataframe(
+                df_f[['Fecha de Ingreso', 'Materia Prima', 'Lote', 'Trazabilidad', 'Caja Nº', 'Observaciones']],
+                use_container_width=True, hide_index=True
+            )
+            
+            # Gráfico con meses en español
+            orden_meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+            
+            fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
+                               title="Volumen de Ingresos Mensuales",
+                               labels={'Mes_Nombre': 'Mes', 'count': 'Frecuencia'},
+                               category_orders={"Mes_Nombre": orden_meses})
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No hay datos para los filtros seleccionados.")
+
+else:
+    # --- SECCIÓN LABORATORIO ---
+    df_raw = load_data()
+    
+    st.sidebar.markdown("---")
+    app_mode = st.sidebar.selectbox("Seleccione el Dashboard de Laboratorio", 
+                                    ["Dashboard General", 
+                                     "Estudio de Vida Útil", 
+                                     "Predicción de Riesgo"])
+    
+    if app_mode == "Dashboard General":
+        st.title("🔬 Dashboard General de Calidad")
+        if not df_raw.empty:
+            st.success(f"Base de datos de laboratorio cargada: {len(df_raw)} registros.")
+        else:
+            st.error("⚠️ Error: No se pudo cargar 'Prueba Tableau.csv'.")
+
+    elif app_mode == "Estudio de Vida Útil":
+        st.title("⏱️ Análisis de Envejecimiento Natural")
+        st.info("Gráficos de curvas de supervivencia y estabilidad sensorial.")
+
+    elif app_mode == "Predicción de Riesgo":
+        st.title("🔮 Modelado de Riesgo Futuro")
+        st.info("Predicción de probabilidad de rancidez basada en históricos.")
 
 # --- LÓGICA DE VISUALIZACIÓN MATERIAS PRIMAS ---
 if ver_materias_primas:
