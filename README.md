@@ -16,7 +16,7 @@ Para garantizar que los gráficos siempre muestren la información más reciente
 
 Origen de Datos: Los analistas cargan la información en Hojas de Cálculo de Google (o archivos CSV en Drive).
 
-Frecuencia: Todos los días a las 06:00 am, se dispara una tarea automática en la nube (GitHub Actions).
+Frecuencia: Todos los días a las 03:00 am, se dispara una tarea automática en la nube (GitHub Actions).
 
 Proceso de Descarga (update_data.py): Un script de Python se conecta a los enlaces públicos de Drive y descarga las versiones más recientes de:
 
@@ -45,3 +45,5 @@ Comparativa Interanual: En la sección de Suministros, permite seleccionar un in
 Curvas de Estabilidad: Visualización de la degradación sensorial en función de los días transcurridos desde el envasado.
 
 Predicción de Riesgo: Identificación de "puntos de quiebre" donde el producto empieza a mostrar signos de inestabilidad (RI/RD).
+
+Un resumen de implementación puede verse en: https://drive.google.com/file/d/1_cVNPSKnYAqeUxVHP0ZFEyuLzG9-X56E/view?usp=sharing
