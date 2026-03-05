@@ -2,16 +2,19 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 1. CONFIGURACIÓN INICIAL
+# 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
 st.set_page_config(page_title="Gestión de Calidad AI", layout="wide", page_icon="🔬")
 
-# Diccionario de traducción de meses
+# Definición de constantes al más alto nivel para evitar NameError
 MESES_ES = {
     "January": "Enero", "February": "Febrero", "March": "Marzo",
     "April": "Abril", "May": "Mayo", "June": "Junio",
     "July": "Julio", "August": "Agosto", "September": "Septiembre",
     "October": "Octubre", "November": "Noviembre", "December": "Diciembre"
 }
+
+ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+               "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # 2. DEFINICIÓN DE FUNCIONES DE CARGA
 
@@ -37,38 +40,36 @@ def load_data_laboratorio():
         df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
         df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
         
-        # Normalización de Envasadoras (para evitar duplicados por espacios o mayúsculas)
+        # Normalización de Envasadoras
         if 'Envasadora' in df.columns:
             df['Envasadora'] = df['Envasadora'].fillna('OTRA').str.strip().str.upper()
             
         return df
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data
 def load_data_materias_primas():
-    """Carga la base de datos de materias primas manejando el encabezado dinámico."""
+    """Carga la base de datos de materias primas."""
     try:
-        # Intento 1: Saltando la fila de título
+        # Intento 1: Saltando la fila de título decorativa si existe
         df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
         
-        # Validación de si cargó bien las columnas
         if 'Materia Prima' not in df_mp.columns:
-             # Intento 2: Carga directa
              df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
 
-        # Limpieza de nombres de columnas y datos
         df_mp.columns = [c.strip() for c in df_mp.columns]
         
         if 'Fecha de Ingreso' in df_mp.columns:
             df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
             df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
             df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
+            df_mp['Mes_Num'] = df_mp['Fecha de Ingreso'].dt.month
         
         df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
         
         return df_mp
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 # 3. BARRA LATERAL Y NAVEGACIÓN
@@ -96,11 +97,11 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
             # Filtros de Suministros
             c1, c2 = st.columns(2)
             with c1:
-                anios = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
-                anio_sel = st.selectbox("Año de Ingreso:", ["Todos"] + anios)
+                anios_lista = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
+                anio_sel = st.selectbox("Año de Ingreso:", ["Todos"] + anios_lista)
             with c2:
-                items = sorted(df_mp['Materia Prima'].unique())
-                items_sel = st.multiselect("Ingrediente Específico:", items, key="sum_items")
+                items_lista = sorted(df_mp['Materia Prima'].unique())
+                items_sel = st.multiselect("Ingrediente Específico:", items_lista, key="sum_items")
 
             df_f = df_mp.copy()
             if anio_sel != "Todos":
@@ -117,6 +118,7 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
             st.dataframe(df_f, use_container_width=True, hide_index=True)
             
             if not df_f.empty:
+                # Usamos la constante ORDEN_MESES definida arriba
                 fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
                                    title="Volumen de Muestreo Mensual (Selección Actual)",
                                    category_orders={"Mes_Nombre": ORDEN_MESES})
@@ -125,8 +127,8 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
         with tab_sum2:
             st.subheader("Comparación de Análisis por Mes (Histórico)")
             
-            # Filtro para la comparativa (Multiselección obligatoria para que tenga sentido comparar)
-            items_comp = st.multiselect("Seleccione Producto(s) para comparar años:", items, key="comp_items")
+            # Filtro para la comparativa
+            items_comp = st.multiselect("Seleccione Producto(s) para comparar años:", items_lista, key="comp_items")
             
             if not items_comp:
                 st.info("Seleccione uno o más productos para ver la comparación interanual.")
@@ -137,7 +139,7 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 df_counts = df_comp.groupby(['Año_Ingreso', 'Mes_Nombre', 'Mes_Num']).size().reset_index(name='Cantidad')
                 df_counts = df_counts.sort_values('Mes_Num')
                 
-                # Gráfico de líneas interanual
+                # Gráfico de líneas interanual utilizando ORDEN_MESES
                 fig_inter = px.line(
                     df_counts, 
                     x='Mes_Nombre', 
@@ -156,7 +158,7 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
 
 else:
-    # --- SECCIÓN LABORATORIO (RECONSTRUIDA) ---
+    # --- SECCIÓN LABORATORIO ---
     st.title("🔬 Análisis de Vida Útil Natural")
     df_lab = load_data_laboratorio()
     
@@ -209,7 +211,6 @@ else:
                     color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'},
                     labels={'Dias_Vida_Real': 'Días transcurridos desde envasado'}
                 )
-                # Línea de advertencia en 300 días
                 fig_scatter.add_vline(x=300, line_dash="dash", line_color="orange", annotation_text="Límite 300d")
                 st.plotly_chart(fig_scatter, use_container_width=True)
                 
@@ -222,7 +223,6 @@ else:
 
         with tab3:
             st.subheader("Análisis de Riesgo y Punto de Quiebre")
-            # Filtrar solo las que fallaron para ver el "Cuándo"
             df_fallas = df_lab_f[df_lab_f['Análisis final'].isin(['RI', 'RD'])]
             
             if not df_fallas.empty:
@@ -233,6 +233,6 @@ else:
                 col_r1.error(f"Primer signo de inestabilidad detectado a los: {int(dia_quiebre)} días")
                 col_r2.warning(f"Punto de quiebre promedio (Mediana): {int(dia_promedio)} días")
                 
-                st.info("💡 **Recomendación:** Los lotes que superan los 365 días deben ser priorizados para análisis sensorial inmediato.")
+                st.info("💡 **Recomendación:** Los lotes que superan los 300 días deben ser priorizados para análisis sensorial inmediato.")
             else:
                 st.success("✅ No se detectan fallas críticas (RI/RD) en la selección actual.")
