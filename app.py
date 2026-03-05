@@ -4,7 +4,8 @@ import plotly.express as px
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
 st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
-Estilos CSS para el informe y la UI
+
+# Estilos CSS para el informe y la UI
 
 st.markdown("""
 <style>
