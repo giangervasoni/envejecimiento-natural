@@ -168,7 +168,7 @@ else:
         st.info("Predicción de probabilidad de rancidez basada en históricos.")
 
 # --- LÓGICA DE VISUALIZACIÓN MATERIAS PRIMAS ---
-if ver_materias_primas:
+if area_trabajo == "📦 Suministros (Materias Primas)":
     st.title("📦 Control de Materias Primas")
     st.markdown("Gestión de ingresos, trazabilidad y filtros por producto/año.")
 
