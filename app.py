@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
 st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
 
-# Estilos CSS para el informe y la UI
+# Estilos CSS
 st.markdown("""
 <style>
 .informe-tecnico {
@@ -22,29 +22,48 @@ st.markdown("""
     margin-top: 20px;
     border: 1px solid #e5e7eb;
 }
+.status-tag {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+    font-weight: bold;
+}
+.status-online { background-color: #dcfce7; color: #166534; }
+.status-offline { background-color: #fee2e2; color: #991b1b; }
 </style>
 """, unsafe_allow_html=True)
-
-# Constantes
-MESES_ES = {
-    "January": "Enero", "February": "Febrero", "March": "Marzo",
-    "April": "Abril", "May": "Mayo", "June": "Junio",
-    "July": "Julio", "August": "Agosto", "September": "Septiembre",
-    "October": "Octubre", "November": "Noviembre", "December": "Diciembre"
-}
-
-ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-               "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # --- CONFIGURACIÓN DE IA (Hugging Face) ---
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 
-# Lista de modelos para redundancia (si uno da 404, probamos el siguiente)
-MODELOS_HF = [
+# Lista extendida de modelos candidatos
+MODELOS_CANDIDATOS = [
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "meta-llama/Llama-2-7b-chat-hf",
-    "mistralai/Mistral-7B-Instruct-v0.3"
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "HuggingFaceH4/zephyr-7b-beta",
+    "microsoft/Phi-3-mini-4k-instruct",
+    "google/gemma-2-9b-it"
 ]
+
+def verificar_disponibilidad_modelos():
+    """
+    Escanea los modelos candidatos y devuelve solo los que están 'Loaded' o disponibles.
+    Esto actúa como nuestro propio framework de diagnóstico.
+    """
+    modelos_vivos = []
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    
+    for model_id in MODELOS_CANDIDATOS:
+        api_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        try:
+            # Hacemos una petición vacía para ver el estado del modelo
+            response = requests.get(api_url, headers=headers, timeout=5)
+            # Si el modelo está disponible para la API gratuita, suele responder con info del modelo (200)
+            if response.status_code == 200:
+                modelos_vivos.append(model_id)
+        except:
+            continue
+    return modelos_vivos
 
 # --- LÓGICA DE CONTROL DE CUOTA ---
 def verificar_cuota():
@@ -55,20 +74,16 @@ def verificar_cuota():
                                     if ahora - req < timedelta(seconds=60)]
     return len(st.session_state.ai_requests)
 
-# 2. DEFINICIÓN DE FUNCIONES DE CARGA
+# 2. CARGA DE DATOS (CON FORMATO DE FECHA CORREGIDO)
 @st.cache_data
 def load_data_laboratorio():
     try:
-        # Intentamos cargar el archivo local que sincroniza GitHub Actions
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
         for col in ['Fecha de Envasado', 'Fecha de análisis']:
             if col in df.columns:
-                # Especificamos dayfirst=True para evitar los warnings de inferencia de formato
                 df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
-        
         if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
             df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
-            
         df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
         df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
         return df
@@ -83,121 +98,77 @@ def load_data_materias_primas():
         df_mp.columns = [c.strip() for c in df_mp.columns]
         if 'Fecha de Ingreso' in df_mp.columns:
             df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
-            df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
-            df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
-        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
         return df_mp
     except Exception as e:
         st.error(f"Error al cargar Materias Primas: {e}")
         return pd.DataFrame()
 
 # --- COMUNICACIÓN CON IA ---
-def llamar_ia_calidad(prompt_texto):
+def llamar_ia_calidad(prompt_texto, modelos_prioritarios):
     if not HF_TOKEN:
-        return "⚠️ Error: HF_TOKEN no configurado en los Secrets de Streamlit."
+        return "⚠️ Error: HF_TOKEN no configurado."
     
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     
-    # Probamos con la lista de modelos para evitar el error 404
-    for model_path in MODELOS_HF:
-        api_url = f"https://router.huggingface.co/hf-inference/models/{model_path}"
-        
-        # Formato optimizado
+    # Usamos los modelos que detectamos como 'vivos'
+    for model_path in modelos_prioritarios:
+        api_url = f"https://api-inference.huggingface.co/models/{model_path}"
         payload = {
-            "inputs": f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\nEres un Director de Calidad experto en alimentos. Generas informes técnicos y breves.<|eot_id|><|start_header_id|>user<|end_header_id|>\n{prompt_texto}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n",
-            "parameters": {"max_new_tokens": 500, "temperature": 0.7}
+            "inputs": f"<|system|>\nEres un Director de Calidad. Redacta un informe técnico breve.</s>\n<|user|>\n{prompt_texto}</s>\n<|assistant|>\n",
+            "parameters": {"max_new_tokens": 500, "temperature": 0.3}
         }
-        
         try:
-            response = requests.post(api_url, headers=headers, json=payload, timeout=25)
+            response = requests.post(api_url, headers=headers, json=payload, timeout=20)
             if response.status_code == 200:
                 st.session_state.ai_requests.append(datetime.now())
                 res_json = response.json()
-                if isinstance(res_json, list) and len(res_json) > 0:
-                    return res_json[0].get('generated_text', "Error al extraer texto.")
-                elif isinstance(res_json, dict) and 'generated_text' in res_json:
-                    return res_json['generated_text']
-                return str(res_json)
-            elif response.status_code == 404:
-                # Si el modelo no existe o no está cargado, intentamos con el siguiente de la lista
-                continue
-            elif response.status_code in [429, 503]:
+                texto = res_json[0].get('generated_text', "") if isinstance(res_json, list) else res_json.get('generated_text', "")
+                if "<|assistant|>" in texto: texto = texto.split("<|assistant|>")[-1]
+                return texto.strip()
+            elif response.status_code == 503: # Modelo cargándose
                 time.sleep(2)
                 continue
-            else:
-                return f"❌ Error de API ({response.status_code}) en {model_path}: {response.text}"
-        except Exception as e:
+        except:
             continue
-            
-    return "⚠️ Ninguno de los modelos de IA está disponible en este momento. Intenta más tarde."
+    return "❌ Lo sentimos, los modelos gratuitos están saturados. Intenta en 1 minuto."
 
-# 3. INTERFAZ Y NAVEGACIÓN
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
-st.sidebar.title("🤖 Gestión de Calidad")
-area_trabajo = st.sidebar.radio(
-    "Navegación:",
-    ["📦 Materias Primas", "🔬 Laboratorio", "🧠 Informe con IA"]
-)
+# 3. INTERFAZ
+st.sidebar.title("🔬 Gestión de Calidad")
+area_trabajo = st.sidebar.radio("Navegación:", ["📦 Materias Primas", "🔬 Laboratorio", "🧠 Informe con IA"])
 
-peticiones_actuales = verificar_cuota()
-st.sidebar.markdown("---")
-st.sidebar.subheader("📊 Uso de API (Llama 3.1)")
-st.sidebar.progress(peticiones_actuales / 15)
-st.sidebar.caption(f"{peticiones_actuales}/15 peticiones por minuto")
+# Diagnóstico de modelos en el sidebar
+with st.sidebar.expander("📡 Estado de la Red IA"):
+    if st.button("Escanear Modelos"):
+        vivos = verificar_disponibilidad_modelos()
+        st.session_state.modelos_vivos = vivos
+    
+    modelos_actuales = st.session_state.get('modelos_vivos', MODELOS_CANDIDATOS[:2])
+    for m in MODELOS_CANDIDATOS:
+        status = "online" if m in modelos_actuales else "offline"
+        st.markdown(f"**{m.split('/')[-1]}** <span class='status-tag status-{status}'>{status.upper()}</span>", unsafe_allow_html=True)
 
-# Carga de datos
 df_lab = load_data_laboratorio()
-df_mp = load_data_materias_primas()
 
-if area_trabajo == "📦 Materias Primas":
-    st.title("📦 Control de Materias Primas")
-    if not df_mp.empty:
-        c1, c2 = st.columns(2)
-        with c1:
-            anios = sorted(df_mp['Año_Ingreso'].unique(), reverse=True)
-            anio_sel = st.selectbox("Año:", ["Todos"] + list(anios))
-        with c2:
-            insumos = sorted(df_mp['Materia Prima'].unique())
-            insumo_sel = st.multiselect("Insumo:", insumos)
-        
-        df_f = df_mp.copy()
-        if anio_sel != "Todos": df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
-        if insumo_sel: df_f = df_f[df_f['Materia Prima'].isin(insumo_sel)]
-        
-        st.dataframe(df_f, width="stretch", hide_index=True)
-        if not df_f.empty:
-            fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', category_orders={"Mes_Nombre": ORDEN_MESES})
-            st.plotly_chart(fig, width="stretch")
-
-elif area_trabajo == "🧠 Informe con IA":
-    st.title("🧠 Auditoría de Calidad Asistida")
-    if df_lab.empty:
-        st.warning("No hay datos cargados para analizar.")
-    else:
-        prod_target = st.selectbox("Producto para Auditoría:", sorted(df_lab['Producto'].unique()))
-        df_prod = df_lab[df_lab['Producto'] == prod_target]
-        
-        if st.button("Generar Informe Técnico"):
-            if peticiones_actuales < 15:
-                with st.spinner(f"Analizando tendencias para {prod_target}..."):
-                    resumen_datos = df_prod[['Dias_Vida_Real', 'Análisis final']].tail(15).to_string(index=False)
-                    prompt = f"Analiza estos datos de estabilidad del producto {prod_target}:\n{resumen_datos}\nDetermina si hay riesgo de rancidez y recomienda acciones profesionales."
-                    respuesta = llamar_ia_calidad(prompt)
-                    st.markdown(f"<div class='informe-tecnico'>{respuesta}</div>", unsafe_allow_html=True)
-            else:
-                st.error("Límite de velocidad alcanzado. Espere un momento.")
-
-else: # Laboratorio
-    st.title("🔬 Análisis de Vida Útil")
+if area_trabajo == "🧠 Informe con IA":
+    st.title("🧠 Auditoría de Calidad con IA")
     if not df_lab.empty:
-        prods = st.multiselect("Filtrar Productos:", sorted(df_lab['Producto'].unique()), default=sorted(df_lab['Producto'].unique())[:1])
-        df_f = df_lab[df_lab['Producto'].isin(prods)]
-        
-        tab1, tab2 = st.tabs(["📊 Distribución", "📈 Evolución Temporal"])
-        with tab1:
-            fig_pie = px.pie(df_f, names='Análisis final', title="Estado Sensorial de Muestras")
-            st.plotly_chart(fig_pie, width="stretch")
-        with tab2:
-            fig_scat = px.scatter(df_f, x='Dias_Vida_Real', y='Producto', color='Análisis final', 
-                                 color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-            st.plotly_chart(fig_scat, width="stretch")
+        prod_target = st.selectbox("Producto:", sorted(df_lab['Producto'].unique()))
+        if st.button("Generar Informe Técnico"):
+            vivos = st.session_state.get('modelos_vivos', verificar_disponibilidad_modelos())
+            if vivos:
+                with st.spinner(f"Analizando con {vivos[0]}..."):
+                    resumen = df_lab[df_lab['Producto']==prod_target].tail(10).to_string()
+                    prompt = f"Analiza la estabilidad de {prod_target} basado en estos datos sensoriales: {resumen}"
+                    informe = llamar_ia_calidad(prompt, vivos)
+                    st.markdown(f"<div class='informe-tecnico'>{informe}</div>", unsafe_allow_html=True)
+            else:
+                st.error("No se detectaron modelos operativos en la red gratuita.")
+
+elif area_trabajo == "🔬 Laboratorio":
+    st.title("🔬 Laboratorio")
+    st.dataframe(df_lab, width="stretch")
+
+else:
+    st.title("📦 Materias Primas")
+    df_mp = load_data_materias_primas()
+    st.dataframe(df_mp, width="stretch")
