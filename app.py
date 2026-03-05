@@ -2,203 +2,150 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# 1. CONFIGURACIÓN Y CARGA
-st.set_page_config(page_title="Gestión de Calidad", layout="wide")
+# 1. CONFIGURACIÓN INICIAL
+st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
+
+# Diccionario de traducción de meses
+MESES_ES = {
+    "January": "Enero", "February": "Febrero", "March": "Marzo",
+    "April": "Abril", "May": "Mayo", "June": "Junio",
+    "July": "Julio", "August": "Agosto", "September": "Septiembre",
+    "October": "Octubre", "November": "Noviembre", "December": "Diciembre"
+}
+
+# 2. DEFINICIÓN DE FUNCIONES (Debe ir antes de cualquier llamada)
 
 @st.cache_data
-def load_data():
-    # Ingesta robusta: detecta separador y salta líneas corruptas
-    df = pd.read_csv("Prueba Tableau.csv", 
-                     encoding='latin1', 
-                     sep=None, 
-                     engine='python', 
-                     on_bad_lines='skip')
-    
-    # Limpieza y Conversión
-    df['Análisis final'] = df['Análisis final'].fillna('OK')
-    df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
-    df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
-    
-    # --- LIMPIEZA DE NULOS ---
-    # Eliminamos filas donde el nombre del Producto sea nulo 
-    # o lo reemplazamos por 'SIN NOMBRE'
-    df['Producto'] = df['Producto'].fillna('DESCONOCIDO')
-    
-    # --- PROCESO DE UNIFICACIÓN ---
-    # 1. Convertir todo a MAYÚSCULAS para evitar duplicados por minúsculas
-    df['Producto'] = df['Producto'].str.upper().str.strip()
-
-    df['Producto'] = df['Producto'].replace({
-        'AVENA INSTANTANEA': 'AVENA INSTANTÁNEA',
-        'AVENA HARINA': 'AVENA INSTANTÁNEA'
-    }, regex=True)
-    
-    # Ingeniería de Características (Features)
-    df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
-    df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
-    
-    mapa_envase = {'P': 'Pouch', 'E': 'Estuche', 'G': 'Granel'}
-    df['Tipo de Envase'] = df['P/E/G'].map(mapa_envase).fillna('Otro')
-    return df
-
-try:
-    df_raw = load_data()
-except Exception as e:
-    st.error(f"Error al cargar el archivo: {e}")
-    st.stop()
-
-@st.cache_data
-def load_materias_primas():
-    # Carga específica para el archivo de Materias Primas según estructura detectada
+def load_data_laboratorio():
+    """Carga la base de datos de análisis de laboratorio."""
     try:
-        df_mp = pd.read_csv("Materia prima.csv", 
-                            encoding='latin1', 
-                            sep=';',
-                            engine='python')
+        # Intentar cargar el archivo de laboratorio
+        df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
         
-        # Limpieza de nombres de columnas por si acaso hay espacios invisibles
-        df_mp.columns = [c.strip() for c in df_mp.columns]
+        # Procesamiento de columnas críticas
+        if 'Fecha de Envasado' in df.columns:
+            df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
+            df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
         
-        # Conversión de Fecha de Ingreso (Formato detectado: D/M/YYYY)
-        df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
-        df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
+        if 'Fecha de análisis' in df.columns:
+            df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
+            
+        if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
+            df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
+            
+        df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
+        df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
         
-        # Normalización de nombres de Materia Prima para filtros limpios
-        # Convertimos a Título (ej: "miel" -> "Miel") para agrupar correctamente
-        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
-        df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
-        
-        return df_mp
+        return df
     except Exception as e:
         return pd.DataFrame()
 
-# Ejecución de carga
-df_raw = load_data()
-df_mp_raw = load_materias_primas()
+@st.cache_data
+def load_data_materias_primas():
+    """Carga la base de datos de ingresos de materias primas."""
+    try:
+        df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
 
-# 2. NAVEGACIÓN LATERAL
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=50)
-st.sidebar.title("🤖 Gestión de calidad")
-# Separación clara de Áreas de Trabajo
-st.sidebar.markdown("### 🛠️ Área de Trabajo")
+        # Limpieza de nombres de columnas
+        df_mp.columns = [c.strip() for c in df_mp.columns]
+        
+        # Procesamiento de fechas
+        if 'Fecha de Ingreso' in df_mp.columns:
+            df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
+            df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
+            df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
+        
+        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
+        
+        return df_mp
+    except Exception as e:
+        # Fallback total: Carga sin procesar
+        try:
+            return pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
+        except:
+            return pd.DataFrame()
+
+# 3. BARRA LATERAL Y NAVEGACIÓN
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
+st.sidebar.title("🤖 Gestión de Calidad")
+
 area_trabajo = st.sidebar.radio(
     "Seleccione el sector:",
-    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Análisis Vida Útil)"]
+    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Vida Útil)"]
 )
 
-# 4. LÓGICA DE VISUALIZACIÓN
+# 4. EJECUCIÓN SEGÚN SELECCIÓN
+
 if area_trabajo == "📦 Suministros (Materias Primas)":
-    # --- SECCIÓN MATERIAS PRIMAS ---
+    st.title("📦 Control de Materias Primas")
+    
+    # LLAMADA A LA FUNCIÓN YA DEFINIDA
     df_mp = load_data_materias_primas()
     
-    st.title("📦 Gestión de Materias Primas")
-    st.markdown("Control de ingresos, trazabilidad y volumen de suministros.")
-
     if df_mp.empty:
-        st.error("⚠️ No se pudo cargar 'Materia prima.csv'. Verifique que el archivo esté en el repositorio.")
+        st.error("⚠️ Error: No se pudo cargar el archivo 'Materia prima.csv'. Asegúrese de que esté en el directorio raíz.")
     else:
-        # Filtros específicos de MP
-        st.markdown("### 🔍 Filtros")
+        # Filtros
         col1, col2 = st.columns([1, 2])
         with col1:
-            años = sorted([a for a in df_mp['Año_Ingreso'].unique() if 2020 <= a <= 2026], reverse=True)
-            año_sel = st.selectbox("Año de Ingreso:", ["Todos"] + años)
+            anios = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
+            anio_sel = st.selectbox("Filtrar por Año:", ["Todos"] + anios)
         with col2:
-            productos = sorted(df_mp['Materia Prima'].unique())
-            prod_sel = st.multiselect("Filtrar Ingredientes:", productos)
+            items = sorted(df_mp['Materia Prima'].unique())
+            items_sel = st.multiselect("Filtrar por Ingrediente:", items)
 
-        # Filtrado
+        # Aplicar filtros
         df_f = df_mp.copy()
-        if año_sel != "Todos":
-            df_f = df_f[df_f['Año_Ingreso'] == año_sel]
-        if prod_sel:
-            df_f = df_f[df_f['Materia Prima'].isin(prod_sel)]
+        if anio_sel != "Todos":
+            df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
+        if items_sel:
+            df_f = df_f[df_f['Materia Prima'].isin(items_sel)]
 
-        st.divider()
+        # Métricas
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Ingresos Registrados", len(df_f))
+        m2.metric("Insumos Distintos", df_f['Materia Prima'].nunique())
         
-        if not df_f.empty:
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Lotes Totales", len(df_f))
-            m2.metric("Insumos Únicos", df_f['Materia Prima'].nunique())
-            ultima = df_f['Fecha de Ingreso'].max()
-            m3.metric("Última Recepción", ultima.strftime('%d/%m/%Y') if pd.notnull(ultima) else "N/A")
-
-            st.subheader("📋 Registro de Trazabilidad")
-            st.dataframe(df_f[['Fecha de Ingreso', 'Materia Prima', 'Lote', 'Trazabilidad', 'Caja Nº', 'Observaciones']], 
-                         use_container_width=True, hide_index=True)
-            
-            # Gráfico de barras mensual
+        # Tabla
+        st.subheader("📋 Detalle de Ingresos")
+        st.dataframe(df_f, use_container_width=True, hide_index=True)
+        
+        # Gráfico
+        if not df_f.empty and 'Mes_Nombre' in df_f.columns:
             orden_meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
                           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
             fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
-                               title="Ingresos Mensuales por Producto",
-                               category_orders={"Mes_Nombre": orden_meses},
-                               labels={'Mes_Nombre': 'Mes', 'count': 'Frecuencia'})
+                               title="Frecuencia de Ingresos Mensuales",
+                               category_orders={"Mes_Nombre": orden_meses})
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("No se encontraron registros con los filtros aplicados.")
 
 else:
-    # --- SECCIÓN LABORATORIO ---
+    # SECCIÓN LABORATORIO
+    st.title("🔬 Análisis de Laboratorio")
+    
+    # LLAMADA A LA FUNCIÓN YA DEFINIDA
     df_lab = load_data_laboratorio()
     
-    st.sidebar.divider()
-    app_mode = st.sidebar.selectbox("Seleccione Dashboard:", 
-                                   ["Dashboard General", "Estudio de Vida Útil", "Comparativa Económica", "Simulador de Riesgo"])
-
     if df_lab.empty:
-        st.error("⚠️ No se pudo cargar 'Prueba Tableau.csv'.")
+        st.error("⚠️ Error: No se pudo cargar 'Prueba Tableau.csv'.")
     else:
-        if app_mode == "Dashboard General":
-            st.title("🔬 Dashboard General de Calidad")
-            st.success(f"Base de datos cargada: {len(df_lab)} registros de laboratorio.")
+        app_mode = st.sidebar.selectbox("Seleccione Dashboard:", 
+                                       ["General", "Vida Útil", "Riesgo"])
+        
+        if app_mode == "General":
+            st.subheader("Resumen de Muestras")
+            st.write(f"Total de registros analizados: {len(df_lab)}")
             
-            # Filtros globales de Lab
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                prods_lab = sorted(df_lab['Producto'].unique())
-                sel_prods = st.multiselect("Productos:", prods_lab, default=prods_lab[:3])
-            with col_f2:
-                anios_lab = sorted(df_lab['Año_Envasado'].dropna().unique().astype(int), reverse=True)
-                sel_anios = st.multiselect("Años de Envasado:", anios_lab, default=anios_lab[:2])
-            
-            df_fil = df_lab[(df_lab['Producto'].isin(sel_prods)) & (df_lab['Año_Envasado'].isin(sel_anios))]
-            
-            if not df_fil.empty:
-                st.divider()
-                # Gráfico de torta
-                fig_pie = px.pie(df_fil, names='Producto', title="Distribución de Muestras por Producto")
-                st.plotly_chart(fig_pie, use_container_width=True)
-                
-                # Histórico
-                df_counts = df_lab[df_lab['Producto'].isin(sel_prods)].groupby(['Año_Envasado', 'Producto']).size().reset_index(name='Cant')
-                fig_evol = px.line(df_counts, x='Año_Envasado', y='Cant', color='Producto', markers=True, title="Evolución de Análisis")
-                st.plotly_chart(fig_evol, use_container_width=True)
+            # Gráfico de barras por producto
+            fig_lab = px.bar(df_lab['Producto'].value_counts().reset_index(), 
+                            x='Producto', y='count', title="Muestras por Producto")
+            st.plotly_chart(fig_lab, use_container_width=True)
+
+        elif app_mode == "Vida Útil":
+            st.subheader("Estudio de Estabilidad")
+            if 'Dias_Vida_Real' in df_lab.columns:
+                fig_vida = px.box(df_lab, x='Producto', y='Dias_Vida_Real', color='Análisis final',
+                                 title="Días de Vida Útil antes de Análisis")
+                st.plotly_chart(fig_vida, use_container_width=True)
             else:
-                st.info("Seleccione filtros para visualizar los datos.")
-
-        elif app_mode == "Estudio de Vida Útil":
-            st.title("⏱️ Análisis de Vida Útil Real")
-            df_vida = df_lab[(df_lab['Dias_Vida_Real'] >= 0) & (df_lab['Dias_Vida_Real'] <= 500)].copy()
-            
-            prods_vida = sorted(df_vida['Producto'].unique())
-            sel_p = st.multiselect("Seleccionar Productos para comparar:", prods_vida, default=prods_vida[:2])
-            
-            df_v_fil = df_vida[df_vida['Producto'].isin(sel_p)]
-            
-            fig_v = px.strip(df_v_fil, x="Dias_Vida_Real", y="Producto", color="Análisis final",
-                             title="Dispersión de Resultados en el Tiempo (Días)",
-                             color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-            fig_v.add_vline(x=450, line_dash="dash", line_color="red")
-            st.plotly_chart(fig_v, use_container_width=True)
-
-        elif app_mode == "Comparativa Económica":
-            st.title("⚖️ Impacto Económico de Calidad")
-            st.info("Cálculo estimado de pérdidas por descarte de lotes prematuros.")
-            # Lógica de costos (similar a la anterior)
-            
-        elif app_mode == "Simulador de Riesgo":
-            st.title("🔮 Predicción de Riesgo Sensorial")
-            st.markdown("Estimación basada en el comportamiento histórico de degradación.")
-            dias = st.slider("Días de almacenamiento previstos:", 0, 450, 180)
-            st.metric("Probabilidad de Rancidez", f"{min(100, (dias/450)*40):.1f}%")
+                st.warning("Datos de fechas insuficientes para calcular Vida Útil.")
