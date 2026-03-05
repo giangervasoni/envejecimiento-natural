@@ -8,171 +8,293 @@ from datetime import datetime, timedelta
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
 st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
 
-# Estilos CSS
+# Estilos CSS para el informe y la UI
 st.markdown("""
 <style>
 .informe-tecnico {
-    background-color: #f9fafb;
-    padding: 30px;
-    border-radius: 8px;
-    border-left: 5px solid #3b82f6;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    color: #1f2937;
-    line-height: 1.6;
-    margin-top: 20px;
-    border: 1px solid #e5e7eb;
+background-color: white;
+padding: 45px;
+border-radius: 4px;
+border: 1px solid #d1d5db;
+box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+font-family: 'serif';
+color: #111827;
+line-height: 1.7;
 }
-.status-tag {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.8em;
-    font-weight: bold;
-}
-.status-online { background-color: #dcfce7; color: #166534; }
-.status-offline { background-color: #fee2e2; color: #991b1b; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- CONFIGURACIÓN DE IA (Hugging Face) ---
-HF_TOKEN = st.secrets.get("HF_TOKEN", "")
+# Definición de constantes al más alto nivel para evitar NameError
 
-# Lista extendida de modelos candidatos
-MODELOS_CANDIDATOS = [
-    "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "HuggingFaceH4/zephyr-7b-beta",
-    "microsoft/Phi-3-mini-4k-instruct",
-    "google/gemma-2-9b-it"
-]
+MESES_ES = {
+    "January": "Enero", "February": "Febrero", "March": "Marzo",
+    "April": "Abril", "May": "Mayo", "June": "Junio",
+    "July": "Julio", "August": "Agosto", "September": "Septiembre",
+    "October": "Octubre", "November": "Noviembre", "December": "Diciembre"
+}
 
-def verificar_disponibilidad_modelos():
-    """
-    Escanea los modelos candidatos y devuelve solo los que están 'Loaded' o disponibles.
-    Esto actúa como nuestro propio framework de diagnóstico.
-    """
-    modelos_vivos = []
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
-    for model_id in MODELOS_CANDIDATOS:
-        api_url = f"https://api-inference.huggingface.co/models/{model_id}"
-        try:
-            # Hacemos una petición vacía para ver el estado del modelo
-            response = requests.get(api_url, headers=headers, timeout=5)
-            # Si el modelo está disponible para la API gratuita, suele responder con info del modelo (200)
-            if response.status_code == 200:
-                modelos_vivos.append(model_id)
-        except:
-            continue
-    return modelos_vivos
+ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+               "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# --- LÓGICA DE CONTROL DE CUOTA ---
+# API KEY (Configurada por el entorno)
+API_KEY = ""
+
+# --- LÓGICA DE CONTROL DE CUOTA (RATE LIMITING) ---
 def verificar_cuota():
+    """
+    Gestiona el límite de 15 peticiones por minuto para el Free Tier.
+    """
     if 'ai_requests' not in st.session_state:
         st.session_state.ai_requests = []
+    
+    # Limpiar peticiones antiguas (más de 60 segundos)
     ahora = datetime.now()
     st.session_state.ai_requests = [req for req in st.session_state.ai_requests 
                                     if ahora - req < timedelta(seconds=60)]
+    
     return len(st.session_state.ai_requests)
 
-# 2. CARGA DE DATOS (CON FORMATO DE FECHA CORREGIDO)
+# 2. DEFINICIÓN DE FUNCIONES DE CARGA
 @st.cache_data
 def load_data_laboratorio():
+    """Carga la base de datos de análisis de laboratorio con limpieza profunda."""
     try:
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
-        # Especificamos el formato exacto para evitar UserWarnings
-        for col in ['Fecha de Envasado', 'Fecha de análisis']:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], dayfirst=True, format='%d/%m/%Y', errors='coerce')
-        
+# Procesamiento de fechas
+        if 'Fecha de Envasado' in df.columns:
+            df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
+            df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
+        if 'Fecha de análisis' in df.columns:
+            df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
+        # Cálculo de días de vida real
         if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
             df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
-            
+        # Limpieza de categorías
         df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
         df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
-        return df
-    except Exception as e:
-        st.error(f"Error al cargar Laboratorio: {e}")
+        # Normalización de Envasadoras
+        if 'Envasadora' in df.columns:
+            df['Envasadora'] = df['Envasadora'].fillna('OTRA').str.strip().str.upper()
+            return df
+    except Exception:
         return pd.DataFrame()
 
 @st.cache_data
 def load_data_materias_primas():
+    """Carga la base de datos de materias primas."""
     try:
+        # Intento 1: Saltando la fila de título decorativa si existe
         df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
+        if 'Materia Prima' not in df_mp.columns:
+             df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
         df_mp.columns = [c.strip() for c in df_mp.columns]
         if 'Fecha de Ingreso' in df_mp.columns:
-            # Especificamos formato para evitar advertencias de inferencia
-            df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, format='%d/%m/%Y', errors='coerce')
+            df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
+            df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
+            df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
+            df_mp['Mes_Num'] = df_mp['Fecha de Ingreso'].dt.month
+        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
         return df_mp
-    except Exception as e:
-        st.error(f"Error al cargar Materias Primas: {e}")
+    except Exception:
         return pd.DataFrame()
 
-# --- COMUNICACIÓN CON IA ---
-def llamar_ia_calidad(prompt_texto, modelos_prioritarios):
-    if not HF_TOKEN:
-        return "⚠️ Error: HF_TOKEN no configurado."
+# --- COMUNICACIÓN CON GEMINI ---
+def llamar_ia_calidad(prompt_texto):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={API_KEY}"
     
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
-    # Usamos los modelos que detectamos como 'vivos'
-    for model_path in modelos_prioritarios:
-        api_url = f"https://api-inference.huggingface.co/models/{model_path}"
-        payload = {
-            "inputs": f"<|system|>\nEres un Director de Calidad. Redacta un informe técnico breve.</s>\n<|user|>\n{prompt_texto}</s>\n<|assistant|>\n",
-            "parameters": {"max_new_tokens": 500, "temperature": 0.3}
+    payload = {
+        "contents": [{"parts": [{"text": prompt_texto}]}],
+        "systemInstruction": {
+            "parts": [{"text": "Eres un Director de Calidad experto en estabilidad de alimentos. Generas informes técnicos, académicos y breves. Tu objetivo es identificar riesgos de rancidez basándote en los días de vida útil."}]
         }
-        try:
-            response = requests.post(api_url, headers=headers, json=payload, timeout=20)
-            if response.status_code == 200:
-                st.session_state.ai_requests.append(datetime.now())
-                res_json = response.json()
-                texto = res_json[0].get('generated_text', "") if isinstance(res_json, list) else res_json.get('generated_text', "")
-                if "<|assistant|>" in texto: texto = texto.split("<|assistant|>")[-1]
-                return texto.strip()
-            elif response.status_code == 503: # Modelo cargándose
-                time.sleep(2)
-                continue
-        except:
-            continue
-    return "❌ Lo sentimos, los modelos gratuitos están saturados. Intenta en 1 minuto."
-
-# 3. INTERFAZ
-st.sidebar.title("🔬 Gestión de Calidad")
-area_trabajo = st.sidebar.radio("Navegación:", ["📦 Materias Primas", "🔬 Laboratorio", "🧠 Informe con IA"])
-
-# Diagnóstico de modelos en el sidebar
-with st.sidebar.expander("📡 Estado de la Red IA"):
-    if st.button("Escanear Modelos"):
-        vivos = verificar_disponibilidad_modelos()
-        st.session_state.modelos_vivos = vivos
+    }
     
-    modelos_actuales = st.session_state.get('modelos_vivos', MODELOS_CANDIDATOS[:2])
-    for m in MODELOS_CANDIDATOS:
-        status = "online" if m in modelos_actuales else "offline"
-        st.markdown(f"**{m.split('/')[-1]}** <span class='status-tag status-{status}'>{status.upper()}</span>", unsafe_allow_html=True)
+    try:
+        # Implementación de reintentos básicos (Exponential Backoff simple)
+        for i in range(3):
+            response = requests.post(url, json=payload, timeout=15)
+            if response.status_code == 200:
+                # Registrar petición exitosa en la cuota
+                st.session_state.ai_requests.append(datetime.now())
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 429: # Too Many Requests
+                time.sleep(2 ** i)
+        return "⚠️ Error: Se ha excedido el límite de velocidad de la API. Intente en un momento."
+    except Exception as e:
+        return f"❌ Error de conexión: {str(e)}"
 
-df_lab = load_data_laboratorio()
+# 3. BARRA LATERAL Y NAVEGACIÓN
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
+st.sidebar.title("🤖 Gestión de Calidad")
+area_trabajo = st.sidebar.radio(
+    "Seleccione el sector:",
+    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Vida Útil)", "Generador de Informes"]
+)
+# Monitor de Cuota en Sidebar
+peticiones_actuales = verificar_cuota()
+st.sidebar.markdown("---")
+st.sidebar.subheader("📊 Cuota de usos gratuitos (máx. 15")
+st.sidebar.progress(peticiones_actuales / 15)
+st.sidebar.caption(f"{peticiones_actuales} de 15 peticiones/min utilizadas")
 
-if area_trabajo == "🧠 Informe con IA":
-    st.title("🧠 Auditoría de Calidad con IA")
-    if not df_lab.empty:
-        prod_target = st.selectbox("Producto:", sorted(df_lab['Producto'].unique()))
-        if st.button("Generar Informe Técnico"):
-            vivos = st.session_state.get('modelos_vivos', verificar_disponibilidad_modelos())
-            if vivos:
-                with st.spinner(f"Analizando con {vivos[0]}..."):
-                    resumen = df_lab[df_lab['Producto']==prod_target].tail(10).to_string()
-                    prompt = f"Analiza la estabilidad de {prod_target} basado en estos datos sensoriales: {resumen}"
-                    informe = llamar_ia_calidad(prompt, vivos)
-                    st.markdown(f"<div class='informe-tecnico'>{informe}</div>", unsafe_allow_html=True)
-            else:
-                st.error("No se detectaron modelos operativos en la red gratuita.")
-
-elif area_trabajo == "🔬 Laboratorio":
-    st.title("🔬 Laboratorio")
-    st.dataframe(df_lab, width="stretch")
-
-else:
-    st.title("📦 Materias Primas")
+# 4. LÓGICA DE VISUALIZACIÓN
+if area_trabajo == "📦 Suministros (Materias Primas)":
+    st.title("📦 Control de Ingreso de Materias Primas")
     df_mp = load_data_materias_primas()
-    st.dataframe(df_mp, width="stretch")
+    if df_mp.empty:
+        st.error("⚠️ No se pudo cargar 'Materia prima.csv'. Verifique el archivo.")
+    else:
+        # Pestañas para Suministros
+        tab_sum1, tab_sum2 = st.tabs(["📊 Vista Actual", "🔄 Comparativa Interanual"])
+        with tab_sum1:
+            # Filtros de Suministros
+            c1, c2 = st.columns(2)
+            with c1:
+                anios_lista = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
+                anio_sel = st.selectbox("Año de Ingreso:", ["Todos"] + anios_lista)
+            with c2:
+                items_lista = sorted(df_mp['Materia Prima'].unique())
+                items_sel = st.multiselect("Ingrediente Específico:", items_lista, key="sum_items")
+            df_f = df_mp.copy()
+            if anio_sel != "Todos":
+                df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
+            if items_sel:
+                df_f = df_f[df_f['Materia Prima'].isin(items_sel)]
+            # Métricas Rápidas
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Registros", len(df_f))
+            m2.metric("Insumos Únicos", df_f['Materia Prima'].nunique())
+            m3.metric("Último Ingreso", str(df_f['Fecha de Ingreso'].max().date()) if not df_f.empty else "N/A")
+            st.dataframe(df_f, use_container_width=True, hide_index=True)
+            if not df_f.empty:
+                # Usamos la constante ORDEN_MESES definida arriba
+                fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
+                                   title="Volumen de Muestreo Mensual (Selección Actual)",
+                                   category_orders={"Mes_Nombre": ORDEN_MESES})
+                st.plotly_chart(fig, use_container_width=True)
+        with tab_sum2:
+            st.subheader("Comparación de Análisis por Mes (Histórico)")
+            # Filtro para la comparativa
+            items_comp = st.multiselect("Seleccione Producto(s) para comparar años:", items_lista, key="comp_items")
+            if not items_comp:
+                st.info("Seleccione uno o más productos para ver la comparación interanual.")
+            else:
+                df_comp = df_mp[df_mp['Materia Prima'].isin(items_comp)]
+                # Agrupamos por Año y Mes para contar análisis
+                df_counts = df_comp.groupby(['Año_Ingreso', 'Mes_Nombre', 'Mes_Num']).size().reset_index(name='Cantidad')
+                df_counts = df_counts.sort_values('Mes_Num')
+                # Gráfico de líneas interanual utilizando ORDEN_MESES
+                fig_inter = px.line(
+                    df_counts, 
+                    x='Mes_Nombre', 
+                    y='Cantidad', 
+                    color='Año_Ingreso',
+                    markers=True,
+                    title=f"Evolución Interanual de Análisis: {', '.join(items_comp)}",
+                    category_orders={"Mes_Nombre": ORDEN_MESES},
+                    labels={'Cantidad': 'Núm. de Análisis', 'Mes_Nombre': 'Mes', 'Año_Ingreso': 'Año'}
+                )
+                st.plotly_chart(fig_inter, use_container_width=True)
+                # Tabla comparativa tipo Pivot
+                st.markdown("**Tabla Comparativa Mensual (Cantidades)**")
+                pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
+                st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
+
+elif area_trabajo == "Generador de Informes IA":
+    st.title("🧠 Auditoría Inteligente")
+    
+    if df_lab.empty:
+        st.warning("Cargue datos para habilitar el asistente.")
+    else:
+        producto = st.selectbox("Seleccione Producto para Análisis", df_lab['Producto'].unique())
+        df_prod = df_lab[df_lab['Producto'] == producto]
+        
+        st.info(f"Analizando {len(df_prod)} registros de {producto}.")
+        
+        # Botón con lógica de bloqueo por cuota
+        if peticiones_actuales >= 15:
+            st.error("🚫 Límite de 15 peticiones por minuto alcanzado. Espere un momento.")
+            st.button("Generar Informe", disabled=True)
+        else:
+            if st.button("Generar Informe Técnico con IA"):
+                with st.spinner("Procesando datos en Gemini 2.5 Flash..."):
+                    # Compactar datos para ahorrar tokens
+                    resumen = df_prod[['Dias_Vida_Real', 'Análisis final']].to_string(index=False)
+                    prompt = f"Producto: {producto}\nDatos:\n{resumen}\n\nAnaliza la estabilidad y sugiere límite de vida útil."
+                    
+                    resultado = llamar_ia_calidad(prompt)
+                    
+                    st.markdown("---")
+                    st.markdown("### 📋 Resultado del Análisis")
+                    st.write(resultado)
+                    
+                    # Botón para limpiar reporte
+                    if st.button("Limpiar Reporte"):
+                        st.rerun()
+                        
+else:
+    # --- SECCIÓN LABORATORIO ---
+    st.title("🔬 Análisis de Vida Útil Natural")
+    df_lab = load_data_laboratorio()
+    if df_lab.empty:
+        st.error("⚠️ No se pudo cargar 'Prueba Tableau.csv'.")
+    else:
+        # Filtros Superiores de Laboratorio
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Filtros de Análisis")
+        productos_lab = sorted(df_lab['Producto'].unique())
+        prod_sel = st.sidebar.multiselect("Seleccionar Producto(s):", productos_lab, default=productos_lab[:2] if len(productos_lab)>1 else productos_lab)
+        env_list = ["TODAS"] + sorted(df_lab['Envasadora'].unique()) if 'Envasadora' in df_lab.columns else ["N/A"]
+        env_sel = st.sidebar.selectbox("Línea de Envasado:", env_list)
+        # Aplicar Filtros
+        mask = df_lab['Producto'].isin(prod_sel)
+        if env_sel != "TODAS":
+            mask &= (df_lab['Envasadora'] == env_sel)
+        df_lab_f = df_lab[mask]
+        
+        # Pestañas de Laboratorio
+        tab1, tab2, tab3 = st.tabs(["📊 Vista General", "📉 Curva de Estabilidad", "🚨 Riesgo de Rancidez"])
+        with tab1:
+            st.subheader("Estado de Muestras en Sala")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Muestras Analizadas", len(df_lab_f))
+        # Conteo de estados
+            status_counts = df_lab_f['Análisis final'].value_counts().reset_index()
+            fig_pie = px.pie(status_counts, values='count', names='Análisis final', 
+                            title="Distribución de Resultados (Sensorial)",
+                            color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
+            st.plotly_chart(fig_pie)
+        with tab2:
+            st.subheader("Evolución de la Estabilidad en el Tiempo")
+            if 'Dias_Vida_Real' in df_lab_f.columns:
+                # Gráfico de dispersión de Vida Útil
+                fig_scatter = px.scatter(
+                    df_lab_f, 
+                    x='Dias_Vida_Real', 
+                    y='Producto', 
+                    color='Análisis final',
+                    hover_data=['Fecha de Envasado', 'Fecha de análisis'],
+                    title="Días de Vida Útil vs Resultado Sensorial",
+                    color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'},
+                    labels={'Dias_Vida_Real': 'Días transcurridos desde envasado'}
+                )
+                fig_scatter.add_vline(x=300, line_dash="dash", line_color="orange", annotation_text="Límite 300d")
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                # Boxplot de comparación
+                fig_box = px.box(df_lab_f, x='Análisis final', y='Dias_Vida_Real', color='Análisis final',
+                                title="Distribución de Tiempos por Estado")
+                st.plotly_chart(fig_box, use_container_width=True)
+            else:
+                st.warning("No hay datos suficientes de fechas para graficar la evolución temporal.")
+        with tab3:
+            st.subheader("Análisis de Riesgo y Punto de Quiebre")
+            df_fallas = df_lab_f[df_lab_f['Análisis final'].isin(['RI', 'RD'])]
+            if not df_fallas.empty:
+                dia_quiebre = df_fallas['Dias_Vida_Real'].min()
+                dia_promedio = df_fallas['Dias_Vida_Real'].median()
+                col_r1, col_r2 = st.columns(2)
+                col_r1.error(f"Primer signo de inestabilidad detectado a los: {int(dia_quiebre)} días")
+                col_r2.warning(f"Punto de quiebre promedio (Mediana): {int(dia_promedio)} días")
+                st.info("💡 **Recomendación:** Los lotes que superan los 300 días deben ser priorizados para análisis sensorial inmediato.")
+            else:
+                st.success("✅ No se detectan fallas críticas (RI/RD) en la selección actual.")
