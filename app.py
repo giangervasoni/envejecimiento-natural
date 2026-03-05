@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import requests
+import time
+from datetime import datetime, timedelta
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
 st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
@@ -32,6 +35,24 @@ MESES_ES = {
 
 ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+# API KEY (Configurada por el entorno)
+API_KEY = ""
+
+# --- LÓGICA DE CONTROL DE CUOTA (RATE LIMITING) ---
+def verificar_cuota():
+    """
+    Gestiona el límite de 15 peticiones por minuto para el Free Tier.
+    """
+    if 'ai_requests' not in st.session_state:
+        st.session_state.ai_requests = []
+    
+    # Limpiar peticiones antiguas (más de 60 segundos)
+    ahora = datetime.now()
+    st.session_state.ai_requests = [req for req in st.session_state.ai_requests 
+                                    if ahora - req < timedelta(seconds=60)]
+    
+    return len(st.session_state.ai_requests)
 
 # 2. DEFINICIÓN DE FUNCIONES DE CARGA
 @st.cache_data
@@ -77,13 +98,44 @@ def load_data_materias_primas():
     except Exception:
         return pd.DataFrame()
 
+# --- COMUNICACIÓN CON GEMINI ---
+def llamar_ia_calidad(prompt_texto):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={API_KEY}"
+    
+    payload = {
+        "contents": [{"parts": [{"text": prompt_texto}]}],
+        "systemInstruction": {
+            "parts": [{"text": "Eres un Director de Calidad experto en estabilidad de alimentos. Generas informes técnicos, académicos y breves. Tu objetivo es identificar riesgos de rancidez basándote en los días de vida útil."}]
+        }
+    }
+    
+    try:
+        # Implementación de reintentos básicos (Exponential Backoff simple)
+        for i in range(3):
+            response = requests.post(url, json=payload, timeout=15)
+            if response.status_code == 200:
+                # Registrar petición exitosa en la cuota
+                st.session_state.ai_requests.append(datetime.now())
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 429: # Too Many Requests
+                time.sleep(2 ** i)
+        return "⚠️ Error: Se ha excedido el límite de velocidad de la API. Intente en un momento."
+    except Exception as e:
+        return f"❌ Error de conexión: {str(e)}"
+
 # 3. BARRA LATERAL Y NAVEGACIÓN
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
 st.sidebar.title("🤖 Gestión de Calidad")
 area_trabajo = st.sidebar.radio(
     "Seleccione el sector:",
-    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Vida Útil)"]
+    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Vida Útil)", "Generador de Informes"]
 )
+# Monitor de Cuota en Sidebar
+peticiones_actuales = verificar_cuota()
+st.sidebar.markdown("---")
+st.sidebar.subheader("📊 Cuota de usos gratuitos (máx. 15")
+st.sidebar.progress(peticiones_actuales / 15)
+st.sidebar.caption(f"{peticiones_actuales} de 15 peticiones/min utilizadas")
 
 # 4. LÓGICA DE VISUALIZACIÓN
 if area_trabajo == "📦 Suministros (Materias Primas)":
@@ -147,6 +199,39 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 st.markdown("**Tabla Comparativa Mensual (Cantidades)**")
                 pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
                 st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
+
+else if area_trabajo == "Generador de Informes IA":
+    st.title("🧠 Auditoría Inteligente")
+    
+    if df_lab.empty:
+        st.warning("Cargue datos para habilitar el asistente.")
+    else:
+        producto = st.selectbox("Seleccione Producto para Análisis", df_lab['Producto'].unique())
+        df_prod = df_lab[df_lab['Producto'] == producto]
+        
+        st.info(f"Analizando {len(df_prod)} registros de {producto}.")
+        
+        # Botón con lógica de bloqueo por cuota
+        if peticiones_actuales >= 15:
+            st.error("🚫 Límite de 15 peticiones por minuto alcanzado. Espere un momento.")
+            st.button("Generar Informe", disabled=True)
+        else:
+            if st.button("Generar Informe Técnico con IA"):
+                with st.spinner("Procesando datos en Gemini 2.5 Flash..."):
+                    # Compactar datos para ahorrar tokens
+                    resumen = df_prod[['Dias_Vida_Real', 'Análisis final']].to_string(index=False)
+                    prompt = f"Producto: {producto}\nDatos:\n{resumen}\n\nAnaliza la estabilidad y sugiere límite de vida útil."
+                    
+                    resultado = llamar_ia_calidad(prompt)
+                    
+                    st.markdown("---")
+                    st.markdown("### 📋 Resultado del Análisis")
+                    st.write(resultado)
+                    
+                    # Botón para limpiar reporte
+                    if st.button("Limpiar Reporte"):
+                        st.rerun()
+                        
 else:
     # --- SECCIÓN LABORATORIO ---
     st.title("🔬 Análisis de Vida Útil Natural")
