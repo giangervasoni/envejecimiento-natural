@@ -85,8 +85,7 @@ def load_mp_data():
 
 def llamar_ia_calidad(prompt_data):
     """
-    Función robusta para interactuar con Gemini 2.5.
-    Implementa reintentos y manejo de errores según los logs.
+    Función para interactuar con Gemini.
     """
     api_key = "" # Se inyecta automáticamente
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={api_key}"
@@ -101,29 +100,15 @@ def llamar_ia_calidad(prompt_data):
         }
     }
 
-    retries = 5
-    for i in range(retries):
-        try:
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data['candidates'][0]['content']['parts'][0]['text']
-            
-            # Si hay error de cuota o servidor, esperar
-            if response.status_code in [429, 500, 503]:
-                time.sleep(2 ** i)
-                continue
-            elif response.status_code == 403:
-                return "Error: Acceso denegado (API Key inválida o sin permisos)."
-            else:
-                return f"Error técnico (Código {response.status_code}): No se pudo generar el informe."
-                
-        except Exception as e:
-            if i == retries - 1:
-                return f"Error de conexión persistente: {str(e)}"
-            time.sleep(2 ** i)
-    return "Error: El servicio de IA no responde tras varios intentos."
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            return data['candidates'][0]['content']['parts'][0]['text']
+        else:
+            return f"Error en la generación del informe (Código {response.status_code})."
+    except Exception as e:
+        return f"No se pudo conectar con el servicio de IA: {str(e)}"
 
 # 4. INTERFAZ DE USUARIO
 
@@ -144,12 +129,12 @@ if menu == "Insumos":
         if sel_ano != "Todos":
             df_f = df_f[df_f['Año'] == sel_ano]
             
-        st.dataframe(df_f, width=None) # Ajuste automático al contenedor
+        st.dataframe(df_f, use_container_width=True)
         
         # Gráfico de tendencia
         tendencia = df_f.groupby('Mes').size().reindex(ORDEN_MESES).reset_index(name='Ingresos')
         fig = px.bar(tendencia, x='Mes', y='Ingresos', title="Volumen de Ingresos Mensuales", color_discrete_sequence=['#3b82f6'])
-        st.plotly_chart(fig, use_container_width=True) # Volvemos a True porque 'stretch' puede fallar en algunas sub-versiones
+        st.plotly_chart(fig, use_container_width=True)
 
 elif menu == "Laboratorio":
     st.header("🔬 Resultados de Envejecimiento")
@@ -157,7 +142,7 @@ elif menu == "Laboratorio":
     
     if not df_lab.empty:
         prods = sorted(df_lab['Producto'].unique())
-        sel_prod = st.multiselect("Seleccionar Producto(s)", prods, default=prods[0])
+        sel_prod = st.multiselect("Seleccionar Producto(s)", prods, default=prods[0] if prods else [])
         
         df_lab_f = df_lab[df_lab['Producto'].isin(sel_prod)]
         
@@ -166,7 +151,7 @@ elif menu == "Laboratorio":
         m2.metric("Promedio Días", int(df_lab_f['Dias_Vida'].mean()) if 'Dias_Vida' in df_lab_f.columns else 0)
         m3.metric("Alertas RD", len(df_lab_f[df_lab_f['Análisis final'] == 'RD']))
         
-        st.dataframe(df_lab_f, width=None)
+        st.dataframe(df_lab_f, use_container_width=True)
         
         if 'Dias_Vida' in df_lab_f.columns:
             fig_hist = px.box(df_lab_f, x='Producto', y='Dias_Vida', color='Análisis final', title="Distribución de Estabilidad")
@@ -179,8 +164,7 @@ elif menu == "Reporte IA":
     if st.button("🚀 Generar Informe con IA", use_container_width=True):
         df_context = load_lab_data()
         if not df_context.empty:
-            with st.spinner("Procesando datos con Gemini 2.5 Flash..."):
-                # Enviamos solo una muestra significativa para no saturar el prompt
+            with st.spinner("Procesando datos con Gemini..."):
                 texto_base = df_context.tail(30).to_string()
                 resultado = llamar_ia_calidad(texto_base)
                 
