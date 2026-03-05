@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 
 # 1. CONFIGURACIÓN Y CARGA
-st.set_page_config(page_title="IA Calidad Alimentos", layout="wide")
+st.set_page_config(page_title="Gestión de Calidad", layout="wide")
 
 @st.cache_data
 def load_data():
@@ -47,13 +47,49 @@ except Exception as e:
     st.error(f"Error al cargar el archivo: {e}")
     st.stop()
 
+@st.cache_data
+def load_materias_primas():
+    # Carga específica para el archivo de Materias Primas
+    try:
+        # Intentamos cargar el CSV de materias primas
+        df_mp = pd.read_csv("Materia prima.csv", 
+                            encoding='latin1', 
+                            sep=';',
+                            engine='python')
+        
+        # Limpieza de nombres de columnas
+        df_mp.columns = [c.strip() for c in df_mp.columns]
+        
+        # Conversión de Fecha de Ingreso
+        df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
+        df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
+        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip()
+        
+        return df_mp
+    except Exception as e:
+        return pd.DataFrame() # Retorna vacío si no encuentra el archivo
+
+# Carga de datos
+try:
+    df_raw = load_data()
+    df_mp_raw = load_materias_primas()
+except Exception as e:
+    st.error(f"Error al cargar archivos: {e}")
+    st.stop()
+
 # 2. NAVEGACIÓN LATERAL
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=50)
-st.sidebar.title("🤖 Panel de Control laboratorio de calidad")
+st.sidebar.title("🤖 Gestión de calidad")
 # Indicadores de datos
 total_muestras = len(df_raw)
 ultima_fecha = df_raw['Fecha de análisis'].max().strftime('%d/%m/%Y')
 
+# Sección de Materias Primas
+st.sidebar.markdown("---")
+st.sidebar.subheader("📦 Suministros")
+ver_materias_primas = st.sidebar.checkbox("Ver Materias Primas", value=False)
+
+# Sección de Dashboards de Análisis
 st.sidebar.info(f"""
 **📊 Estado del Dataset:**
 - Total muestras: `{total_muestras}`
@@ -66,7 +102,63 @@ app_mode = st.sidebar.selectbox("Seleccione el Dashboard",
                                  "Comparativa de Productos", 
                                  "Predicción de Riesgo"])
 
-# --- LÓGICA DE VISUALIZACIÓN ---
+# --- LÓGICA DE VISUALIZACIÓN MATERIAS PRIMAS ---
+if ver_materias_primas:
+    st.title("📦 Control de Materias Primas")
+    st.markdown("Gestión de ingresos, trazabilidad y filtros por producto/año.")
+
+    if df_mp_raw.empty:
+        st.warning("No se encontró el archivo 'Materia prima.csv'. Por favor, verifique que el archivo esté en la carpeta.")
+    else:
+        # --- FILTROS DE MATERIAS PRIMAS ---
+        st.markdown("### 🔍 Filtros de Búsqueda")
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            # Filtro por Año (2020 a 2026)
+            años_mp = sorted([a for a in df_mp_raw['Año_Ingreso'].unique() if 2020 <= a <= 2026], reverse=True)
+            año_sel = st.selectbox("Seleccionar Año:", ["Todos"] + años_mp)
+        
+        with col2:
+            # Filtro por Producto (Multiselect)
+            productos_mp = sorted(df_mp_raw['Materia Prima'].unique())
+            prod_sel = st.multiselect("Filtrar por Ingrediente:", productos_mp)
+
+        # Aplicación de lógica de filtrado
+        df_mp_filtrado = df_mp_raw.copy()
+        
+        if año_sel != "Todos":
+            df_mp_filtrado = df_mp_filtrado[df_mp_filtrado['Año_Ingreso'] == año_sel]
+            
+        if prod_sel:
+            df_mp_filtrado = df_mp_filtrado[df_mp_filtrado['Materia Prima'].isin(prod_sel)]
+
+        # --- VISUALIZACIÓN ---
+        st.divider()
+        
+        # Métricas rápidas
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Ingresos", len(df_mp_filtrado))
+        m2.metric("Productos Únicos", df_mp_filtrado['Materia Prima'].nunique())
+        m3.metric("Último Ingreso", df_mp_filtrado['Fecha de Ingreso'].max().strftime('%d/%m/%Y') if not df_mp_filtrado.empty else "N/A")
+
+        # Tabla de datos estilizada
+        st.subheader("📋 Detalle de Trazabilidad")
+        st.dataframe(
+            df_mp_filtrado[['Fecha de Ingreso', 'Materia Prima', 'Lote', 'Trazabilidad', 'Caja Nº']],
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # Gráfico opcional de ingresos por mes si hay datos
+        if not df_mp_filtrado.empty:
+            df_mp_filtrado['Mes'] = df_mp_filtrado['Fecha de Ingreso'].dt.month_name()
+            fig_ingresos = px.histogram(df_mp_filtrado, x='Mes', color='Materia Prima', 
+                                       title="Volumen de ingresos por mes (Filtro actual)",
+                                       category_orders={"Mes": ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Deciembre"]})
+            st.plotly_chart(fig_ingresos, use_container_width=True)
+
+# --- LÓGICA DE VISUALIZACIÓN ENVEJECIMIENTO NATURAL ---
 if app_mode == "Dashboard General":
     st.title("🔬 Dashboard General de Calidad")
     
