@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
-st.set_page_config(page_title="Gestión de Calidad AI", layout="wide", page_icon="🔬")
+st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
 
 # Definición de constantes al más alto nivel para evitar NameError
 MESES_ES = {
