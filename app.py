@@ -89,34 +89,71 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
     if df_mp.empty:
         st.error("⚠️ No se pudo cargar 'Materia prima.csv'. Verifique el archivo.")
     else:
-        # Filtros de Suministros
-        c1, c2 = st.columns(2)
-        with c1:
-            anios = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
-            anio_sel = st.selectbox("Año de Ingreso:", ["Todos"] + anios)
-        with c2:
-            items = sorted(df_mp['Materia Prima'].unique())
-            items_sel = st.multiselect("Ingrediente Específico:", items)
+        # Pestañas para Suministros
+        tab_sum1, tab_sum2 = st.tabs(["📊 Vista Actual", "🔄 Comparativa Interanual"])
 
-        df_f = df_mp.copy()
-        if anio_sel != "Todos":
-            df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
-        if items_sel:
-            df_f = df_f[df_f['Materia Prima'].isin(items_sel)]
+        with tab_sum1:
+            # Filtros de Suministros
+            c1, c2 = st.columns(2)
+            with c1:
+                anios = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
+                anio_sel = st.selectbox("Año de Ingreso:", ["Todos"] + anios)
+            with c2:
+                items = sorted(df_mp['Materia Prima'].unique())
+                items_sel = st.multiselect("Ingrediente Específico:", items, key="sum_items")
 
-        # Métricas Rápidas
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Registros", len(df_f))
-        m2.metric("Insumos Únicos", df_f['Materia Prima'].nunique())
-        m3.metric("Último Ingreso", str(df_f['Fecha de Ingreso'].max().date()) if not df_f.empty else "N/A")
-        
-        st.dataframe(df_f, use_container_width=True, hide_index=True)
-        
-        if not df_f.empty:
-            fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
-                               title="Volumen de Muestreo Mensual",
-                               category_orders={"Mes_Nombre": list(MESES_ES.values())})
-            st.plotly_chart(fig, use_container_width=True)
+            df_f = df_mp.copy()
+            if anio_sel != "Todos":
+                df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
+            if items_sel:
+                df_f = df_f[df_f['Materia Prima'].isin(items_sel)]
+
+            # Métricas Rápidas
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Registros", len(df_f))
+            m2.metric("Insumos Únicos", df_f['Materia Prima'].nunique())
+            m3.metric("Último Ingreso", str(df_f['Fecha de Ingreso'].max().date()) if not df_f.empty else "N/A")
+            
+            st.dataframe(df_f, use_container_width=True, hide_index=True)
+            
+            if not df_f.empty:
+                fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
+                                   title="Volumen de Muestreo Mensual (Selección Actual)",
+                                   category_orders={"Mes_Nombre": ORDEN_MESES})
+                st.plotly_chart(fig, use_container_width=True)
+
+        with tab_sum2:
+            st.subheader("Comparación de Análisis por Mes (Histórico)")
+            
+            # Filtro para la comparativa (Multiselección obligatoria para que tenga sentido comparar)
+            items_comp = st.multiselect("Seleccione Producto(s) para comparar años:", items, key="comp_items")
+            
+            if not items_comp:
+                st.info("Seleccione uno o más productos para ver la comparación interanual.")
+            else:
+                df_comp = df_mp[df_mp['Materia Prima'].isin(items_comp)]
+                
+                # Agrupamos por Año y Mes para contar análisis
+                df_counts = df_comp.groupby(['Año_Ingreso', 'Mes_Nombre', 'Mes_Num']).size().reset_index(name='Cantidad')
+                df_counts = df_counts.sort_values('Mes_Num')
+                
+                # Gráfico de líneas interanual
+                fig_inter = px.line(
+                    df_counts, 
+                    x='Mes_Nombre', 
+                    y='Cantidad', 
+                    color='Año_Ingreso',
+                    markers=True,
+                    title=f"Evolución Interanual de Análisis: {', '.join(items_comp)}",
+                    category_orders={"Mes_Nombre": ORDEN_MESES},
+                    labels={'Cantidad': 'Núm. de Análisis', 'Mes_Nombre': 'Mes', 'Año_Ingreso': 'Año'}
+                )
+                st.plotly_chart(fig_inter, use_container_width=True)
+                
+                # Tabla comparativa tipo Pivot
+                st.markdown("**Tabla Comparativa Mensual (Cantidades)**")
+                pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
+                st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
 
 else:
     # --- SECCIÓN LABORATORIO (RECONSTRUIDA) ---
