@@ -33,13 +33,13 @@ jobs:
         git config --global user.name 'github-actions[bot]'
         git config --global user.email 'github-actions[bot]@users.noreply.github.com'
         
-        # Agregamos ambos posibles archivos
+        # Agregamos ambos archivos para que git rastree cambios en cualquiera de los dos
         git add "Prueba Tableau.csv" "Materia prima.csv"
         
         if git diff --staged --quiet; then
-          echo "No se detectaron cambios nuevos en los datos."
+          echo "No se detectaron cambios nuevos en ninguno de los archivos."
         else
-          git commit -m "🔄 Actualización automática de datos desde Drive"
+          git commit -m "🔄 Actualización automática de datos (Laboratorio y Materias Primas)"
           git push
-          echo "Nuevos datos guardados en el repositorio."
+          echo "Datos sincronizados y guardados en el repositorio."
         fi
