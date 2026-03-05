@@ -79,11 +79,14 @@ def verificar_cuota():
 def load_data_laboratorio():
     try:
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
+        # Especificamos el formato exacto para evitar UserWarnings
         for col in ['Fecha de Envasado', 'Fecha de análisis']:
             if col in df.columns:
-                df[col] = pd.to_datetime(df[col], dayfirst=True, errors='coerce')
+                df[col] = pd.to_datetime(df[col], dayfirst=True, format='%d/%m/%Y', errors='coerce')
+        
         if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
             df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
+            
         df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
         df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
         return df
@@ -97,7 +100,8 @@ def load_data_materias_primas():
         df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=';', engine='python')
         df_mp.columns = [c.strip() for c in df_mp.columns]
         if 'Fecha de Ingreso' in df_mp.columns:
-            df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
+            # Especificamos formato para evitar advertencias de inferencia
+            df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, format='%d/%m/%Y', errors='coerce')
         return df_mp
     except Exception as e:
         st.error(f"Error al cargar Materias Primas: {e}")
