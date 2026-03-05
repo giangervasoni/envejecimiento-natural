@@ -5,272 +5,187 @@ import requests
 import time
 from datetime import datetime
 
-# 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
+# 1. CONFIGURACIÓN INICIAL
 st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
 
-# Estilos CSS para el informe y la UI profesional
+# Estilos CSS profesionales
 st.markdown("""
 <style>
     .informe-tecnico {
         background-color: white;
-        padding: 45px;
-        border-radius: 4px;
-        border: 1px solid #d1d5db;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        font-family: 'serif';
-        color: #111827;
-        line-height: 1.7;
-    }
-    .stMetric {
-        background-color: #f8fafc;
-        padding: 15px;
-        border-radius: 10px;
+        padding: 40px;
+        border-radius: 5px;
         border: 1px solid #e2e8f0;
+        font-family: 'Times New Roman', serif;
+        color: #1a202c;
+        line-height: 1.6;
+    }
+    /* Estilo para métricas */
+    [data-testid="stMetricValue"] {
+        font-size: 28px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Diccionarios de soporte para fechas
+# Constantes de tiempo
 MESES_ES = {
     "January": "Enero", "February": "Febrero", "March": "Marzo",
     "April": "Abril", "May": "Mayo", "June": "Junio",
     "July": "Julio", "August": "Agosto", "September": "Septiembre",
     "October": "Octubre", "November": "Noviembre", "December": "Diciembre"
 }
-
 ORDEN_MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
                "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# 2. DEFINICIÓN DE FUNCIONES DE CARGA Y PROCESAMIENTO
+# 2. CARGA DE DATOS
 
 @st.cache_data
-def load_data_laboratorio():
-    """Carga la base de datos de análisis de laboratorio con limpieza profunda."""
+def load_lab_data():
     try:
+        # Intento de carga con detección automática de separador
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
         df.columns = [c.strip() for c in df.columns]
-
+        
+        # Limpieza de fechas
         if 'Fecha de Envasado' in df.columns:
             df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
-            df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
-        
         if 'Fecha de análisis' in df.columns:
             df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
             
+        # Cálculos de estabilidad
         if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
-            df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
+            df['Dias_Vida'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
             
+        # Normalización de categorías
         if 'Análisis final' in df.columns:
-            df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
+            df['Análisis final'] = df['Análisis final'].fillna('OK').str.upper().str.strip()
         
-        if 'Producto' in df.columns:
-            df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
-        
-        if 'Envasadora' in df.columns:
-            df['Envasadora'] = df['Envasadora'].fillna('OTRA').str.strip().str.upper()
-            
         return df
     except Exception as e:
-        st.error(f"Error cargando Laboratorio: {e}")
+        st.error(f"Error en base de Laboratorio: {e}")
         return pd.DataFrame()
 
 @st.cache_data
-def load_data_materias_primas():
-    """Carga la base de datos de materias primas."""
+def load_mp_data():
     try:
-        df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=None, engine='python')
-        df_mp.columns = [c.strip() for c in df_mp.columns]
+        df = pd.read_csv("Materia prima.csv", encoding='latin1', sep=None, engine='python')
+        df.columns = [c.strip() for c in df.columns]
         
-        if 'Fecha de Ingreso' in df_mp.columns:
-            df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
-            df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
-            df_mp['Mes_Nombre'] = df_mp['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
-            df_mp['Mes_Num'] = df_mp['Fecha de Ingreso'].dt.month
-        
-        if 'Materia Prima' in df_mp.columns:
-            df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
-        
-        return df_mp
+        if 'Fecha de Ingreso' in df.columns:
+            df['Fecha de Ingreso'] = pd.to_datetime(df['Fecha de Ingreso'], dayfirst=True, errors='coerce')
+            df['Año'] = df['Fecha de Ingreso'].dt.year
+            df['Mes'] = df['Fecha de Ingreso'].dt.month_name().map(MESES_ES)
+            
+        return df
     except Exception as e:
-        st.error(f"Error cargando Materias Primas: {e}")
+        st.error(f"Error en base de Materias Primas: {e}")
         return pd.DataFrame()
 
-# 3. LÓGICA DE IA (GEMINI 2.5 FLASH)
+# 3. CONEXIÓN CON INTELIGENCIA ARTIFICIAL
 
-def generar_reporte_ia(datos_contexto):
-    """Genera un informe profesional usando la API de Gemini con manejo de errores y retries."""
-    const_apiKey = "" # La clave de API se inyecta automáticamente en tiempo de ejecución
+def llamar_ia_calidad(prompt_data):
+    """
+    Función robusta para interactuar con Gemini 2.5.
+    Implementa reintentos y manejo de errores según los logs.
+    """
+    api_key = "" # Se inyecta automáticamente
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={api_key}"
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={const_apiKey}"
-    
-    system_prompt = (
-        "Eres un Director de Aseguramiento de Calidad Científico. Redacta informes técnicos detallados. "
-        "Usa un tono formal. Estructura: 1. Resumen, 2. Desviaciones detectadas, 3. Conclusiones técnicas."
-    )
-    
+    headers = {'Content-Type': 'application/json'}
     payload = {
         "contents": [{
-            "parts": [{"text": f"Analiza estos registros de laboratorio y redacta el informe correspondiente: {datos_contexto}"}]
+            "parts": [{"text": f"Actúa como un experto en control de calidad. Redacta un informe técnico basado en estos datos de laboratorio: {prompt_data}"}]
         }],
         "systemInstruction": {
-            "parts": [{"text": system_prompt}]
+            "parts": [{"text": "Usa un lenguaje formal y científico. Divide en: Hallazgos, Análisis de Riesgo y Recomendaciones."}]
         }
     }
 
-    # Implementación de reintentos con backoff exponencial
-    for i in range(5):
+    retries = 5
+    for i in range(retries):
         try:
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
             
             if response.status_code == 200:
-                result = response.json()
-                text_response = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "")
-                if text_response:
-                    return text_response
-                return "La IA devolvió una respuesta vacía."
+                data = response.json()
+                return data['candidates'][0]['content']['parts'][0]['text']
             
-            if response.status_code in [403, 429, 500, 503, 504]:
-                wait_time = (2 ** i)
-                time.sleep(wait_time)
+            # Si hay error de cuota o servidor, esperar
+            if response.status_code in [429, 500, 503]:
+                time.sleep(2 ** i)
                 continue
+            elif response.status_code == 403:
+                return "Error: Acceso denegado (API Key inválida o sin permisos)."
             else:
-                return f"Error en la comunicación con la IA (Código HTTP {response.status_code})."
+                return f"Error técnico (Código {response.status_code}): No se pudo generar el informe."
                 
-        except (requests.exceptions.RequestException, Exception) as e:
+        except Exception as e:
+            if i == retries - 1:
+                return f"Error de conexión persistente: {str(e)}"
             time.sleep(2 ** i)
-            if i == 4:
-                return f"Error crítico de conexión: {str(e)}."
-            
-    return "No se pudo contactar con el servicio de IA tras varios intentos. Verifique su conexión o permisos."
+    return "Error: El servicio de IA no responde tras varios intentos."
 
-# 4. BARRA LATERAL Y NAVEGACIÓN
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
-st.sidebar.title("🔬 Gestión de Calidad AI")
+# 4. INTERFAZ DE USUARIO
 
-area_trabajo = st.sidebar.radio(
-    "Seleccione el sector:",
-    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Vida Útil)", "📝 Generador IA"]
-)
+st.sidebar.title("🔬 Calidad 4.0")
+menu = st.sidebar.radio("Navegación", ["Insumos", "Laboratorio", "Reporte IA"])
 
-# 5. DESARROLLO DE MÓDULOS
-
-if area_trabajo == "📦 Suministros (Materias Primas)":
-    st.title("📦 Control de Ingreso de Materias Primas")
-    df_mp = load_data_materias_primas()
+if menu == "Insumos":
+    st.header("📦 Control de Ingreso de Insumos")
+    df_mp = load_mp_data()
     
-    if df_mp.empty:
-        st.error("⚠️ No se pudo cargar 'Materia prima.csv'. Verifique el archivo.")
-    else:
-        tab_sum1, tab_sum2 = st.tabs(["📊 Vista Actual", "🔄 Comparativa Interanual"])
-
-        with tab_sum1:
-            c1, c2 = st.columns(2)
-            with c1:
-                anios_lista = sorted([a for a in df_mp['Año_Ingreso'].unique() if a > 2000], reverse=True)
-                anio_sel = st.selectbox("Año de Ingreso:", ["Todos"] + anios_lista)
-            with c2:
-                items_lista = sorted(df_mp['Materia Prima'].unique())
-                items_sel = st.multiselect("Filtrar Ingredientes:", items_lista)
-
-            df_f = df_mp.copy()
-            if anio_sel != "Todos":
-                df_f = df_f[df_f['Año_Ingreso'] == anio_sel]
-            if items_sel:
-                df_f = df_f[df_f['Materia Prima'].isin(items_sel)]
-
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Registros", len(df_f))
-            m2.metric("Insumos Únicos", df_f['Materia Prima'].nunique())
-            m3.metric("Último Ingreso", str(df_f['Fecha de Ingreso'].max().date()) if not df_f.empty else "N/A")
-            
-            # Cambiado use_container_width por width='stretch' según logs
-            st.dataframe(df_f, width='stretch', hide_index=True)
-            
-            if not df_f.empty:
-                fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
-                                   title="Volumen de Muestreo Mensual",
-                                   category_orders={"Mes_Nombre": ORDEN_MESES})
-                st.plotly_chart(fig, width='stretch')
-
-        with tab_sum2:
-            st.subheader("Comparación de Análisis por Mes (Histórico)")
-            items_comp = st.multiselect("Seleccione Producto(s) para comparar años:", items_lista, key="comp_items_mp")
-            
-            if items_comp:
-                df_comp = df_mp[df_mp['Materia Prima'].isin(items_comp)]
-                df_counts = df_comp.groupby(['Año_Ingreso', 'Mes_Nombre', 'Mes_Num']).size().reset_index(name='Cantidad')
-                df_counts = df_counts.sort_values('Mes_Num')
-                
-                fig_inter = px.line(df_counts, x='Mes_Nombre', y='Cantidad', color='Año_Ingreso',
-                                    markers=True, title=f"Evolución Interanual",
-                                    category_orders={"Mes_Nombre": ORDEN_MESES})
-                st.plotly_chart(fig_inter, width='stretch')
-                
-                pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
-                st.dataframe(pivot_df.fillna(0).astype(int), width='stretch')
-
-elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
-    st.title("🔬 Análisis de Vida Útil Natural")
-    df_lab = load_data_laboratorio()
-    
-    if df_lab.empty:
-        st.error("⚠️ No se pudo cargar 'Prueba Tableau.csv'.")
-    else:
-        st.sidebar.markdown("---")
-        productos_lab = sorted(df_lab['Producto'].unique())
-        prod_sel = st.sidebar.multiselect("Productos:", productos_lab, default=productos_lab[:1])
+    if not df_mp.empty:
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            anos = sorted(df_mp['Año'].dropna().unique(), reverse=True)
+            sel_ano = st.selectbox("Filtrar por Año", ["Todos"] + list(anos))
         
-        env_list = ["TODAS"] + sorted(df_lab['Envasadora'].unique())
-        env_sel = st.sidebar.selectbox("Línea de Envasado:", env_list)
-
-        mask = df_lab['Producto'].isin(prod_sel)
-        if env_sel != "TODAS":
-            mask &= (df_lab['Envasadora'] == env_sel)
+        df_f = df_mp.copy()
+        if sel_ano != "Todos":
+            df_f = df_f[df_f['Año'] == sel_ano]
+            
+        st.dataframe(df_f, width=None) # Ajuste automático al contenedor
         
-        df_lab_f = df_lab[mask]
+        # Gráfico de tendencia
+        tendencia = df_f.groupby('Mes').size().reindex(ORDEN_MESES).reset_index(name='Ingresos')
+        fig = px.bar(tendencia, x='Mes', y='Ingresos', title="Volumen de Ingresos Mensuales", color_discrete_sequence=['#3b82f6'])
+        st.plotly_chart(fig, use_container_width=True) # Volvemos a True porque 'stretch' puede fallar en algunas sub-versiones
 
-        tab1, tab2, tab3 = st.tabs(["📊 Vista General", "📉 Curva de Estabilidad", "🚨 Riesgo de Rancidez"])
-
-        with tab1:
-            st.subheader("Estado de Muestras en Sala")
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.metric("Muestras Analizadas", len(df_lab_f))
-                status_counts = df_lab_f['Análisis final'].value_counts().reset_index()
-                fig_pie = px.pie(status_counts, values='count', names='Análisis final', 
-                                 color='Análisis final',
-                                 color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-                st.plotly_chart(fig_pie, width='stretch')
-            with c2:
-                st.dataframe(df_lab_f[['Producto', 'Fecha de Envasado', 'Dias_Vida_Real', 'Análisis final']].sort_values('Dias_Vida_Real', ascending=False), width='stretch', hide_index=True)
-
-        with tab2:
-            st.subheader("Evolución de la Estabilidad")
-            if 'Dias_Vida_Real' in df_lab_f.columns:
-                fig_scatter = px.scatter(df_lab_f, x='Dias_Vida_Real', y='Producto', color='Análisis final',
-                                         title="Días de Vida Útil vs Resultado",
-                                         color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-                fig_scatter.add_vline(x=300, line_dash="dash", line_color="orange")
-                st.plotly_chart(fig_scatter, width='stretch')
-
-elif area_trabajo == "📝 Generador IA":
-    st.title("📝 Redacción de Informes")
-    st.info("Utilice este módulo para transformar los datos crudos en un informe profesional.")
+elif menu == "Laboratorio":
+    st.header("🔬 Resultados de Envejecimiento")
+    df_lab = load_lab_data()
     
-    fuente = st.selectbox("Fuente de Datos para el informe:", ["Suministros", "Laboratorio"])
-    
-    if st.button("✨ GENERAR INFORME TÉCNICO", width='stretch'):
-        df_ia = load_data_materias_primas() if fuente == "Suministros" else load_data_laboratorio()
+    if not df_lab.empty:
+        prods = sorted(df_lab['Producto'].unique())
+        sel_prod = st.multiselect("Seleccionar Producto(s)", prods, default=prods[0])
         
-        if not df_ia.empty:
-            with st.spinner("Analizando tendencias y redactando informe..."):
-                contexto_datos = df_ia.head(40).to_string(index=False)
-                informe = generar_reporte_ia(contexto_datos)
+        df_lab_f = df_lab[df_lab['Producto'].isin(sel_prod)]
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Muestras Totales", len(df_lab_f))
+        m2.metric("Promedio Días", int(df_lab_f['Dias_Vida'].mean()) if 'Dias_Vida' in df_lab_f.columns else 0)
+        m3.metric("Alertas RD", len(df_lab_f[df_lab_f['Análisis final'] == 'RD']))
+        
+        st.dataframe(df_lab_f, width=None)
+        
+        if 'Dias_Vida' in df_lab_f.columns:
+            fig_hist = px.box(df_lab_f, x='Producto', y='Dias_Vida', color='Análisis final', title="Distribución de Estabilidad")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+elif menu == "Reporte IA":
+    st.header("📝 Asistente de Redacción Técnica")
+    st.write("Esta herramienta genera un análisis descriptivo basado en los datos de laboratorio actuales.")
+    
+    if st.button("🚀 Generar Informe con IA", use_container_width=True):
+        df_context = load_lab_data()
+        if not df_context.empty:
+            with st.spinner("Procesando datos con Gemini 2.5 Flash..."):
+                # Enviamos solo una muestra significativa para no saturar el prompt
+                texto_base = df_context.tail(30).to_string()
+                resultado = llamar_ia_calidad(texto_base)
                 
-                st.markdown(f'<div class="informe-tecnico">{informe}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="informe-tecnico">{resultado}</div>', unsafe_allow_html=True)
                 
-                st.download_button(
-                    label="📥 Descargar Informe",
-                    data=informe,
-                    file_name=f"Informe_Calidad_{fuente}_{datetime.now().strftime('%Y%m%d')}.txt"
-                )
+                st.download_button("Descargar Informe (TXT)", resultado, file_name="informe_calidad.txt")
+        else:
+            st.warning("No hay datos disponibles para analizar.")
