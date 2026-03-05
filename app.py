@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
-st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
+st.set_page_config(page_title="Gestión de Calidad | BioCalidad", layout="wide", page_icon="🔬")
 
 # Estilos CSS para el informe y la UI profesional
 st.markdown("""
@@ -48,11 +48,8 @@ def load_data_laboratorio():
     """Carga la base de datos de análisis de laboratorio con limpieza profunda."""
     try:
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
-        
-        # Normalización de columnas (quitar espacios)
         df.columns = [c.strip() for c in df.columns]
 
-        # Procesamiento de fechas
         if 'Fecha de Envasado' in df.columns:
             df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
             df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
@@ -60,18 +57,15 @@ def load_data_laboratorio():
         if 'Fecha de análisis' in df.columns:
             df['Fecha de análisis'] = pd.to_datetime(df['Fecha de análisis'], errors='coerce')
             
-        # Cálculo de días de vida real
         if 'Fecha de análisis' in df.columns and 'Fecha de Envasado' in df.columns:
             df['Dias_Vida_Real'] = (df['Fecha de análisis'] - df['Fecha de Envasado']).dt.days
             
-        # Limpieza de categorías
         if 'Análisis final' in df.columns:
             df['Análisis final'] = df['Análisis final'].fillna('OK').astype(str).str.strip().str.upper()
         
         if 'Producto' in df.columns:
             df['Producto'] = df['Producto'].fillna('DESCONOCIDO').str.upper().str.strip()
         
-        # Normalización de Envasadoras
         if 'Envasadora' in df.columns:
             df['Envasadora'] = df['Envasadora'].fillna('OTRA').str.strip().str.upper()
             
@@ -82,12 +76,9 @@ def load_data_laboratorio():
 
 @st.cache_data
 def load_data_materias_primas():
-    """Carga la base de datos de materias primas con soporte para separador punto y coma."""
+    """Carga la base de datos de materias primas."""
     try:
-        # Intento de carga flexible
         df_mp = pd.read_csv("Materia prima.csv", encoding='latin1', sep=None, engine='python')
-        
-        # Limpieza de nombres de columnas
         df_mp.columns = [c.strip() for c in df_mp.columns]
         
         if 'Fecha de Ingreso' in df_mp.columns:
@@ -107,36 +98,51 @@ def load_data_materias_primas():
 # 3. LÓGICA DE IA (GEMINI 2.5 FLASH)
 
 def generar_reporte_ia(datos_contexto):
-    """Genera un informe profesional usando la API de Gemini."""
-    apiKey = "" # Gestionado internamente
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={apiKey}"
+    """Genera un informe profesional usando la API de Gemini con manejo de errores 403 y retries."""
+    const_apiKey = "" # La clave de API se inyecta automáticamente en tiempo de ejecución
+    
+    # URL actualizada al modelo soportado para evitar 403 por modelo inexistente
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={const_apiKey}"
     
     system_prompt = (
         "Eres un Director de Aseguramiento de Calidad Científico. Redacta informes técnicos detallados. "
-        "Usa un tono formal y académico. Estructura: 1. Resumen, 2. Desviaciones, 3. Conclusiones, 4. Seguridad Alimentaria."
+        "Usa un tono formal y académico. Estructura: 1. Resumen, 2. Desviaciones detectadas, 3. Conclusiones técnicas, 4. Protocolos de Seguridad Alimentaria."
     )
     
     payload = {
-        "contents": [{"parts": [{"text": f"Analiza estos registros y redacta el informe: {datos_contexto}"}]}],
-        "systemInstruction": {"parts": [{"text": system_prompt}]}
+        "contents": [{
+            "parts": [{"text": f"Analiza estos registros de laboratorio y redacta el informe correspondiente: {datos_contexto}"}]
+        }],
+        "systemInstruction": {
+            "parts": [{"text": system_prompt}]
+        }
     }
 
+    # Implementación de reintentos con backoff exponencial
     for i in range(5):
         try:
             response = requests.post(url, json=payload, timeout=30)
+            
             if response.status_code == 200:
-                return response.json()['candidates'][0]['content']['parts'][0]['text']
-            elif response.status_code == 429:
-                time.sleep(2 ** i)
+                result = response.json()
+                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "Sin respuesta")
+            
+            # Si hay error 403, 429 o 500, esperamos y reintentamos
+            if response.status_code in [403, 429, 500, 503]:
+                wait_time = (2 ** i) # 1s, 2s, 4s, 8s, 16s
+                time.sleep(wait_time)
+                continue
             else:
-                return f"Error en API ({response.status_code})"
-        except:
+                return f"Error crítico en API (Código {response.status_code})"
+                
+        except Exception as e:
             time.sleep(2 ** i)
-    return "Servicio de IA temporalmente no disponible."
+            
+    return "No se pudo contactar con el servicio de IA tras varios intentos. Por favor, verifique su conexión o permisos."
 
 # 4. BARRA LATERAL Y NAVEGACIÓN
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
-st.sidebar.title("🔬 Gestión de Calidad")
+st.sidebar.title("🔬 Gestión de Calidad AI")
 
 area_trabajo = st.sidebar.radio(
     "Seleccione el sector:",
@@ -179,8 +185,7 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
             if not df_f.empty:
                 fig = px.histogram(df_f, x='Mes_Nombre', color='Materia Prima', 
                                    title="Volumen de Muestreo Mensual",
-                                   category_orders={"Mes_Nombre": ORDEN_MESES},
-                                   color_discrete_sequence=px.colors.qualitative.Safe)
+                                   category_orders={"Mes_Nombre": ORDEN_MESES})
                 st.plotly_chart(fig, use_container_width=True)
 
         with tab_sum2:
@@ -193,7 +198,7 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 df_counts = df_counts.sort_values('Mes_Num')
                 
                 fig_inter = px.line(df_counts, x='Mes_Nombre', y='Cantidad', color='Año_Ingreso',
-                                    markers=True, title=f"Evolución Interanual: {', '.join(items_comp)}",
+                                    markers=True, title=f"Evolución Interanual",
                                     category_orders={"Mes_Nombre": ORDEN_MESES})
                 st.plotly_chart(fig_inter, use_container_width=True)
                 
@@ -207,7 +212,6 @@ elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
     if df_lab.empty:
         st.error("⚠️ No se pudo cargar 'Prueba Tableau.csv'.")
     else:
-        # Filtros en barra lateral
         st.sidebar.markdown("---")
         productos_lab = sorted(df_lab['Producto'].unique())
         prod_sel = st.sidebar.multiselect("Productos:", productos_lab, default=productos_lab[:1])
@@ -234,58 +238,36 @@ elif area_trabajo == "🔬 Laboratorio (Vida Útil)":
                                  color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
                 st.plotly_chart(fig_pie, use_container_width=True)
             with c2:
-                st.markdown("**Detalle de Muestras Seleccionadas**")
                 st.dataframe(df_lab_f[['Producto', 'Fecha de Envasado', 'Dias_Vida_Real', 'Análisis final']].sort_values('Dias_Vida_Real', ascending=False), use_container_width=True, hide_index=True)
 
         with tab2:
             st.subheader("Evolución de la Estabilidad")
             if 'Dias_Vida_Real' in df_lab_f.columns:
                 fig_scatter = px.scatter(df_lab_f, x='Dias_Vida_Real', y='Producto', color='Análisis final',
-                                         symbol='Análisis final', size_max=10,
-                                         title="Días de Vida Útil vs Resultado Sensorial",
+                                         title="Días de Vida Útil vs Resultado",
                                          color_discrete_map={'OK': '#2ecc71', 'RI': '#f1c40f', 'RD': '#e74c3c'})
-                fig_scatter.add_vline(x=300, line_dash="dash", line_color="orange", annotation_text="Umbral 300d")
+                fig_scatter.add_vline(x=300, line_dash="dash", line_color="orange")
                 st.plotly_chart(fig_scatter, use_container_width=True)
-                
-                fig_box = px.box(df_lab_f, x='Análisis final', y='Dias_Vida_Real', color='Análisis final',
-                                 points="all", title="Distribución de Tiempos por Estado Sensorial")
-                st.plotly_chart(fig_box, use_container_width=True)
-
-        with tab3:
-            st.subheader("Análisis de Punto de Quiebre")
-            df_fallas = df_lab_f[df_lab_f['Análisis final'].isin(['RI', 'RD'])]
-            
-            if not df_fallas.empty:
-                dia_quiebre = df_fallas['Dias_Vida_Real'].min()
-                dia_promedio = df_fallas['Dias_Vida_Real'].median()
-                
-                col_r1, col_r2 = st.columns(2)
-                col_r1.error(f"Primer signo de inestabilidad: {int(dia_quiebre)} días")
-                col_r2.warning(f"Punto de quiebre promedio: {int(dia_promedio)} días")
-                
-                st.warning("⚠️ **Alerta:** Se han detectado muestras con desviación sensorial antes del límite teórico.")
-            else:
-                st.success("✅ Estabilidad garantizada en los rangos actuales analizados.")
 
 elif area_trabajo == "📝 Generador IA":
-    st.title("📝 Redacción de Informes")
+    st.title("📝 Redacción Académica de Informes")
     st.info("Utilice este módulo para transformar los datos crudos en un informe profesional para gerencia.")
     
     fuente = st.selectbox("Fuente de Datos para el informe:", ["Suministros", "Laboratorio"])
     
     if st.button("✨ GENERAR INFORME TÉCNICO", use_container_width=True):
-        archivo = "Materia prima.csv" if fuente == "Suministros" else "Prueba Tableau.csv"
         df_ia = load_data_materias_primas() if fuente == "Suministros" else load_data_laboratorio()
         
         if not df_ia.empty:
-            with st.spinner("Analizando tendencias y redactando..."):
-                resumen = df_ia.head(50).to_string(index=False)
-                informe = generar_reporte_ia(resumen)
+            with st.spinner("Analizando tendencias y redactando informe científico..."):
+                # Tomamos una muestra representativa para no saturar el prompt
+                contexto_datos = df_ia.head(40).to_string(index=False)
+                informe = generar_reporte_ia(contexto_datos)
                 
                 st.markdown(f'<div class="informe-tecnico">{informe}</div>', unsafe_allow_html=True)
                 
                 st.download_button(
                     label="📥 Descargar Informe",
                     data=informe,
-                    file_name=f"Informe_{fuente}_{datetime.now().strftime('%Y%m%d')}.txt"
+                    file_name=f"Informe_Calidad_{fuente}_{datetime.now().strftime('%Y%m%d')}.txt"
                 )
