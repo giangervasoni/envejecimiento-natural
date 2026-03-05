@@ -49,33 +49,31 @@ except Exception as e:
 
 @st.cache_data
 def load_materias_primas():
-    # Carga específica para el archivo de Materias Primas
+    # Carga específica para el archivo de Materias Primas según estructura detectada
     try:
-        # Intentamos cargar el CSV de materias primas
         df_mp = pd.read_csv("Materia prima.csv", 
                             encoding='latin1', 
                             sep=';',
                             engine='python')
         
-        # Limpieza de nombres de columnas
+        # Limpieza de nombres de columnas por si acaso hay espacios invisibles
         df_mp.columns = [c.strip() for c in df_mp.columns]
         
-        # Conversión de Fecha de Ingreso
+        # Conversión de Fecha de Ingreso (Formato detectado: D/M/YYYY)
         df_mp['Fecha de Ingreso'] = pd.to_datetime(df_mp['Fecha de Ingreso'], dayfirst=True, errors='coerce')
         df_mp['Año_Ingreso'] = df_mp['Fecha de Ingreso'].dt.year.fillna(0).astype(int)
-        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip()
+        
+        # Normalización de nombres de Materia Prima para filtros limpios
+        # Convertimos a Título (ej: "miel" -> "Miel") para agrupar correctamente
+        df_mp['Materia Prima'] = df_mp['Materia Prima'].fillna('Sin Nombre').str.strip().str.capitalize()
         
         return df_mp
     except Exception as e:
-        return pd.DataFrame() # Retorna vacío si no encuentra el archivo
+        return pd.DataFrame()
 
-# Carga de datos
-try:
-    df_raw = load_data()
-    df_mp_raw = load_materias_primas()
-except Exception as e:
-    st.error(f"Error al cargar archivos: {e}")
-    st.stop()
+# Ejecución de carga
+df_raw = load_data()
+df_mp_raw = load_materias_primas()
 
 # 2. NAVEGACIÓN LATERAL
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=50)
