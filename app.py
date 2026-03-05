@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta
 
 # 1. CONFIGURACIÓN INICIAL Y CONSTANTES GLOBALES
-st.set_page_config(page_title="Gestión de Calidad AI", layout="wide", page_icon="🔬")
+st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="🔬")
 
 # Estilos CSS para el informe y la UI
 st.markdown("""
@@ -125,7 +125,7 @@ def llamar_ia_calidad(prompt_texto):
 # --- 4. ESTRUCTURA DE LA APP ---
 
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", width=60)
-st.sidebar.title("🔬 BioCalidad AI")
+st.sidebar.title("🔬 Gestión de calidad")
 area_trabajo = st.sidebar.radio(
     "Seleccione el sector:",
     ["📦 Suministros", "🔬 Laboratorio", "🧠 Generador de Informes IA"]
