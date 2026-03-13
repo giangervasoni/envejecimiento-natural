@@ -12,20 +12,19 @@ st.set_page_config(page_title="Gestión de Calidad", layout="wide", page_icon="�
 st.markdown("""
 <style>
 .informe-tecnico {
-background-color: white;
-padding: 45px;
-border-radius: 4px;
-border: 1px solid #d1d5db;
-box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-font-family: 'serif';
-color: #111827;
-line-height: 1.7;
+    background-color: white;
+    padding: 45px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    font-family: 'serif';
+    color: #111827;
+    line-height: 1.7;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # Definición de constantes al más alto nivel para evitar NameError
-
 MESES_ES = {
     "January": "Enero", "February": "Febrero", "March": "Marzo",
     "April": "Abril", "May": "Mayo", "June": "Junio",
@@ -60,7 +59,7 @@ def load_data_laboratorio():
     """Carga la base de datos de análisis de laboratorio con limpieza profunda."""
     try:
         df = pd.read_csv("Prueba Tableau.csv", encoding='latin1', sep=None, engine='python')
-# Procesamiento de fechas
+        # Procesamiento de fechas
         if 'Fecha de Envasado' in df.columns:
             df['Fecha de Envasado'] = pd.to_datetime(df['Fecha de Envasado'], errors='coerce')
             df['Año_Envasado'] = df['Fecha de Envasado'].dt.year
@@ -128,12 +127,17 @@ st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1048/1048953.png", widt
 st.sidebar.title("🤖 Gestión de Calidad")
 area_trabajo = st.sidebar.radio(
     "Seleccione el sector:",
-    ["📦 Suministros (Materias Primas)", "🔬 Laboratorio (Vida Útil)", "Generador de Informes"]
+    [
+        "📦 Suministros (Materias Primas)", 
+        "🔬 Laboratorio (Vida Útil)", 
+        "🌡️ Simulador de Estufa (Arrhenius)",
+        "🧠 Generador de Informes IA"
+    ]
 )
 # Monitor de Cuota en Sidebar
 peticiones_actuales = verificar_cuota()
 st.sidebar.markdown("---")
-st.sidebar.subheader("📊 Cuota de usos gratuitos (máx. 15")
+st.sidebar.subheader("📊 Cuota de usos gratuitos (máx. 15)")
 st.sidebar.progress(peticiones_actuales / 15)
 st.sidebar.caption(f"{peticiones_actuales} de 15 peticiones/min utilizadas")
 
@@ -200,11 +204,74 @@ if area_trabajo == "📦 Suministros (Materias Primas)":
                 pivot_df = df_counts.pivot(index='Mes_Nombre', columns='Año_Ingreso', values='Cantidad').reindex(ORDEN_MESES)
                 st.dataframe(pivot_df.fillna(0).astype(int), use_container_width=True)
 
-elif area_trabajo == "Generador de Informes IA":
+# --- NUEVA SECCIÓN: SIMULADOR DE ESTUFA ---
+elif area_trabajo == "🌡️ Simulador de Estufa (Arrhenius)":
+    st.title("🌡️ Simulador de Envejecimiento Acelerado (52°C)")
+    
+    st.markdown("""
+    Esta herramienta aplica la **Ecuación de Arrhenius** para traducir el estrés térmico en tiempo real.
+    Calcula la equivalencia de vida útil real a temperatura ambiente (25°C) basándose en los días de exposición en la estufa (52°C) y la Energía de Activación ($E_a$) de cada matriz alimentaria.
+    """)
+    
+    st.info("""
+    **Fundamento Técnico:**
+    * **Maíz ($E_a$ Alta):** Muy reactivo. Cada grado que subimos en la estufa acelera el deterioro de forma exponencial.
+    * **Avena ($E_a$ Baja):** Baja sensibilidad. El calor casi no acelera su oxidación.
+    """)
+
+    st.markdown("---")
+    
+    # Control Deslizante (Slider)
+    dias_estufa = st.slider("DÍAS PROGRAMADOS EN ESTUFA (52°C):", min_value=1, max_value=120, value=30, step=1)
+    
+    st.markdown(f"### Resultados equivalentes para **{dias_estufa} días** en estufa:")
+    st.write("*(Objetivo de vida útil comercial: 12 meses)*")
+    st.write("")
+
+    # Datos de los productos basados en la bibliografía
+    datos_arrhenius = [
+        {"nombre": "Skarchitos (Maíz)", "fa": 17.8, "desc": "Alta sensibilidad térmica (Li, 2022). La estufa es muy eficiente aquí.", "color": "#2ecc71"},
+        {"nombre": "Cereales Promedio", "fa": 6.2, "desc": "Referencia estándar de la industria (Fritsch & Gale).", "color": "#3498db"},
+        {"nombre": "Avena (Copos)", "fa": 3.0, "desc": "Baja sensibilidad (Feneley, 1998). El calor casi no acelera su oxidación.", "color": "#e67e22"}
+    ]
+
+    # Iterar y crear tarjetas visuales para cada producto
+    for item in datos_arrhenius:
+        dias_reales = int(dias_estufa * item['fa'])
+        meses_reales = round(dias_reales / 30.4, 1)
+        cumple_objetivo = meses_reales >= 12.0
+        
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(f"#### {item['nombre']}")
+                st.caption(item['desc'])
+                # Barra de progreso (Limitada a 1.0 que equivale a 12 meses)
+                progreso = min(meses_reales / 12.0, 1.0)
+                st.progress(progreso)
+                
+            with col2:
+                st.markdown(f"<div style='text-align: right; font-size: 0.8em; color: gray;'>Factor: <b>{item['fa']}x</b></div>", unsafe_allow_html=True)
+                if cumple_objetivo:
+                    st.success(f"✅ {meses_reales} meses\n({dias_reales} días)")
+                else:
+                    st.error(f"⚠️ {meses_reales} meses\n({dias_reales} días)")
+            
+            st.write("---")
+
+    # Alerta crítica sobre la avena
+    st.warning("**Nota Crítica para Gerencia:** Si proponemos un ensayo estándar de 30 días, para la **Avena** solo estaríamos validando ~3 meses de vida real en la calle. No es seguro aprobar 12 meses de vida útil con ese protocolo corto; se requerirían 122 días.")
+
+
+elif area_trabajo == "🧠 Generador de Informes IA":
     st.title("🧠 Auditoría Inteligente")
     
+    # Cargamos el df_lab aquí en caso de que entren directo a esta pestaña
+    df_lab = load_data_laboratorio()
+    
     if df_lab.empty:
-        st.warning("Cargue datos para habilitar el asistente.")
+        st.warning("Cargue datos de laboratorio ('Prueba Tableau.csv') para habilitar el asistente.")
     else:
         producto = st.selectbox("Seleccione Producto para Análisis", df_lab['Producto'].unique())
         df_prod = df_lab[df_lab['Producto'] == producto]
